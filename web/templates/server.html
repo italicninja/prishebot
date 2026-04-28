@@ -39,7 +39,7 @@
     {{ if not .Guild.BotPresent }}
     <div class="invite-banner">
       <p><strong>Prishe isn't in this server yet.</strong> Add her first to use these settings.</p>
-      <a href="https://discord.com/api/oauth2/authorize?client_id={{ .ClientID }}&permissions=2147483647&scope=bot%20applications.commands&guild_id={{ .Guild.ID }}"
+      <a href="https://discord.com/api/oauth2/authorize?client_id={{ .ClientID }}&permissions=17408&scope=bot%20applications.commands&guild_id={{ .Guild.ID }}"
          target="_blank" class="btn btn-primary">
         Add Prishe to Server
       </a>
