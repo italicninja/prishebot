@@ -88,6 +88,8 @@ func (s *Server) routes() *gin.Engine {
 		dash.GET("/server/:id/roles", s.handleRolesPage)
 		dash.POST("/server/:id/roles", s.handleAddRole)
 		dash.POST("/server/:id/roles/:roleID/delete", s.handleDeleteRole)
+		dash.GET("/server/:id/birthday", s.handleBirthdaySettingsPage)
+		dash.POST("/server/:id/birthday", s.handleUpdateBirthdaySettings)
 	}
 
 	return r

@@ -36,7 +36,7 @@ func main() {
 	if err := b.LoadModule(info.New()); err != nil {
 		log.Fatalf("failed to load info module: %v", err)
 	}
-	if err := b.LoadModule(birthday.New(cfg.TenorAPIKey, cfg.BirthdayDataFile)); err != nil {
+	if err := b.LoadModule(birthday.New(cfg.BirthdayDataFile)); err != nil {
 		log.Fatalf("failed to load birthday module: %v", err)
 	}
 	if err := b.LoadModule(roles.New(cfg.RolesDataFile)); err != nil {

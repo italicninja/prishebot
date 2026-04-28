@@ -1,5 +1,6 @@
-// Package birthday wishes users a happy birthday and optionally attaches a
-// random anime GIF fetched from the Tenor API (requires TENOR_API_KEY).
+// Package birthday wishes users a happy birthday with a random GIF fetched
+// from Tenor using the built-in public key — no configuration required.
+// Admins can customise the GIF search query per guild via the web dashboard.
 package birthday
 
 import (
@@ -17,6 +18,13 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+const (
+	// tenorAPIKey is Tenor's public example key — no sign-up required.
+	tenorAPIKey = "LIVDSRZULELA"
+	// defaultGIFQuery is used when a guild hasn't set a custom query.
+	defaultGIFQuery = "anime happy birthday"
+)
+
 // entry holds one user's birthday and the channel where it should be announced.
 type entry struct {
 	Month      int    `json:"month"`
@@ -25,22 +33,34 @@ type entry struct {
 	LastWished string `json:"last_wished"` // "2006-01-02" — prevents re-sending on restart
 }
 
+// guildConfig stores per-guild settings for the birthday module.
+type guildConfig struct {
+	GIFQuery string `json:"gif_query"`
+}
+
+// persistedData is the on-disk format (v2).
+// v1 was a flat map[string]entry; load() migrates it automatically.
+type persistedData struct {
+	Entries map[string]entry       `json:"entries"`
+	Configs map[string]guildConfig `json:"guild_configs"`
+}
+
 // Module implements bot.Module for birthday tracking.
 type Module struct {
-	tenorKey   string
 	dataFile   string
 	httpClient *http.Client
 	mu         sync.Mutex
-	data       map[string]entry // key: "guildID:userID"
+	entries    map[string]entry       // key: "guildID:userID"
+	configs    map[string]guildConfig // key: guildID
 	stop       chan struct{}
 }
 
-func New(tenorKey, dataFile string) *Module {
+func New(dataFile string) *Module {
 	return &Module{
-		tenorKey:   tenorKey,
 		dataFile:   dataFile,
 		httpClient: &http.Client{Timeout: 5 * time.Second},
-		data:       make(map[string]entry),
+		entries:    make(map[string]entry),
+		configs:    make(map[string]guildConfig),
 		stop:       make(chan struct{}),
 	}
 }
@@ -133,7 +153,7 @@ func (m *Module) handleSet(s *discordgo.Session, i *discordgo.InteractionCreate,
 
 	key := i.GuildID + ":" + i.Member.User.ID
 	m.mu.Lock()
-	m.data[key] = entry{Month: month, Day: day, ChannelID: i.ChannelID}
+	m.entries[key] = entry{Month: month, Day: day, ChannelID: i.ChannelID}
 	m.mu.Unlock()
 	m.save()
 
@@ -143,7 +163,7 @@ func (m *Module) handleSet(s *discordgo.Session, i *discordgo.InteractionCreate,
 func (m *Module) handleCheck(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	key := i.GuildID + ":" + i.Member.User.ID
 	m.mu.Lock()
-	e, ok := m.data[key]
+	e, ok := m.entries[key]
 	m.mu.Unlock()
 
 	if !ok {
@@ -156,8 +176,8 @@ func (m *Module) handleCheck(s *discordgo.Session, i *discordgo.InteractionCreat
 func (m *Module) handleRemove(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	key := i.GuildID + ":" + i.Member.User.ID
 	m.mu.Lock()
-	_, ok := m.data[key]
-	delete(m.data, key)
+	_, ok := m.entries[key]
+	delete(m.entries, key)
 	m.mu.Unlock()
 
 	if !ok {
@@ -203,13 +223,14 @@ func (m *Module) checkBirthdays(s *discordgo.Session) {
 
 	type wish struct {
 		key       string
+		guildID   string
 		userID    string
 		channelID string
 	}
 
 	m.mu.Lock()
 	var wishes []wish
-	for key, e := range m.data {
+	for key, e := range m.entries {
 		if e.Month != int(today.Month()) || e.Day != today.Day() || e.LastWished == dateStr {
 			continue
 		}
@@ -217,12 +238,16 @@ func (m *Module) checkBirthdays(s *discordgo.Session) {
 		if len(parts) != 2 {
 			continue
 		}
-		wishes = append(wishes, wish{key: key, userID: parts[1], channelID: e.ChannelID})
+		wishes = append(wishes, wish{key: key, guildID: parts[0], userID: parts[1], channelID: e.ChannelID})
 	}
 	m.mu.Unlock()
 
 	for _, w := range wishes {
-		gifURL := m.fetchGIF() // HTTP call — intentionally outside the mutex
+		m.mu.Lock()
+		query := m.gifQuery(w.guildID)
+		m.mu.Unlock()
+
+		gifURL := m.fetchGIF(query) // HTTP call — intentionally outside the mutex
 
 		embed := &discordgo.MessageEmbed{
 			Description: fmt.Sprintf("🎉 Happy Birthday <@%s>! Wishing you an amazing day! 🎂🥳", w.userID),
@@ -239,25 +264,21 @@ func (m *Module) checkBirthdays(s *discordgo.Session) {
 
 		// Persist immediately so a restart doesn't re-send the same birthday.
 		m.mu.Lock()
-		if e, ok := m.data[w.key]; ok {
+		if e, ok := m.entries[w.key]; ok {
 			e.LastWished = dateStr
-			m.data[w.key] = e
+			m.entries[w.key] = e
 			m.saveUnlocked()
 		}
 		m.mu.Unlock()
 	}
 }
 
-// fetchGIF returns a random anime birthday GIF URL from Tenor, or "" if no
-// API key is configured or the request fails.
-func (m *Module) fetchGIF() string {
-	if m.tenorKey == "" {
-		return ""
-	}
+// fetchGIF returns a random GIF URL from Tenor for the given query.
+func (m *Module) fetchGIF(query string) string {
 	apiURL := fmt.Sprintf(
 		"https://tenor.googleapis.com/v2/search?q=%s&key=%s&limit=20&media_filter=gif&random=true",
-		url.QueryEscape("anime happy birthday"),
-		m.tenorKey,
+		url.QueryEscape(query),
+		tenorAPIKey,
 	)
 	resp, err := m.httpClient.Get(apiURL)
 	if err != nil {
@@ -285,6 +306,40 @@ func (m *Module) fetchGIF() string {
 	return ""
 }
 
+// ── Public API for the web layer ──────────────────────────────────────────────
+
+// GIFQuery returns the configured search query for a guild, or the default.
+func (m *Module) GIFQuery(guildID string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.gifQuery(guildID)
+}
+
+// SetGIFQuery stores a custom GIF search query for a guild.
+func (m *Module) SetGIFQuery(guildID, query string) {
+	m.mu.Lock()
+	cfg := m.configs[guildID]
+	cfg.GIFQuery = strings.TrimSpace(query)
+	m.configs[guildID] = cfg
+	m.mu.Unlock()
+	m.save()
+}
+
+// DefaultGIFQuery returns the built-in default query string, used as placeholder text.
+func DefaultGIFQuery() string { return defaultGIFQuery }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// gifQuery returns the effective GIF query for a guild. Must hold m.mu.
+func (m *Module) gifQuery(guildID string) string {
+	if cfg, ok := m.configs[guildID]; ok && cfg.GIFQuery != "" {
+		return cfg.GIFQuery
+	}
+	return defaultGIFQuery
+}
+
+// ── Persistence ───────────────────────────────────────────────────────────────
+
 func (m *Module) save() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -292,7 +347,10 @@ func (m *Module) save() {
 }
 
 func (m *Module) saveUnlocked() {
-	data, err := json.MarshalIndent(m.data, "", "  ")
+	data, err := json.MarshalIndent(persistedData{
+		Entries: m.entries,
+		Configs: m.configs,
+	}, "", "  ")
 	if err != nil {
 		log.Printf("[birthday] marshal error: %v", err)
 		return
@@ -312,9 +370,25 @@ func (m *Module) load() {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := json.Unmarshal(raw, &m.data); err != nil {
-		log.Printf("[birthday] parse %s error: %v", m.dataFile, err)
+
+	// Try new format first (has an "entries" key at the top level).
+	var pd persistedData
+	if json.Unmarshal(raw, &pd) == nil && pd.Entries != nil {
+		m.entries = pd.Entries
+		if pd.Configs != nil {
+			m.configs = pd.Configs
+		}
+		return
 	}
+
+	// Fall back to v1 flat format: map["guildID:userID"]entry.
+	var old map[string]entry
+	if err := json.Unmarshal(raw, &old); err != nil {
+		log.Printf("[birthday] parse %s error: %v", m.dataFile, err)
+		return
+	}
+	m.entries = old
+	log.Printf("[birthday] migrated %d birthday entries from v1 format", len(old))
 }
 
 func ephemeralRespond(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {

@@ -19,7 +19,6 @@ type Config struct {
 	Port          string // HTTP server port
 	SecretKey     string // Used to sign session cookies
 	SecureCookies bool   // Set true in production (requires HTTPS)
-	TenorAPIKey      string // Optional: Tenor API key for anime birthday GIFs
 	BirthdayDataFile string // Path to birthday persistence file (default: birthdays.json)
 	RolesDataFile    string // Path to roles persistence file (default: roles.json)
 }
@@ -45,7 +44,6 @@ func Load() *Config {
 		Port:          getOrDefault("PORT", "8080"),
 		SecretKey:     loadSecretKey(),
 		SecureCookies: os.Getenv("SECURE_COOKIES") == "true",
-		TenorAPIKey:      os.Getenv("TENOR_API_KEY"),
 		BirthdayDataFile: getOrDefault("BIRTHDAY_DATA_FILE", "birthdays.json"),
 		RolesDataFile:    getOrDefault("ROLES_DATA_FILE", "roles.json"),
 	}

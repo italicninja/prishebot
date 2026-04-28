@@ -13,6 +13,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/gin-gonic/gin"
 
+	"github.com/user/discord-bot-skeleton/bot/modules/birthday"
 	"github.com/user/discord-bot-skeleton/bot/modules/roles"
 )
 
@@ -441,6 +442,58 @@ func randomState() string {
 		panic("crypto/rand unavailable: " + err.Error())
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// handleBirthdaySettingsPage renders the birthday GIF query config page.
+func (s *Server) handleBirthdaySettingsPage(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	src := findGuild(sess.Guilds, guildID)
+	if src == nil {
+		c.String(http.StatusForbidden, "You don't have admin access to that server.")
+		return
+	}
+	guild := *src
+	guild.BotPresent = s.botGuildSet()[guildID]
+
+	currentQuery := birthday.DefaultGIFQuery()
+	if mod, ok := s.bot.Modules()["birthday"]; ok {
+		if bm, ok := mod.(*birthday.Module); ok {
+			currentQuery = bm.GIFQuery(guildID)
+		}
+	}
+
+	if err := s.tmpl.ExecuteTemplate(c.Writer, "birthday-settings.html", gin.H{
+		"User":         sess,
+		"Guild":        &guild,
+		"CurrentQuery": currentQuery,
+		"DefaultQuery": birthday.DefaultGIFQuery(),
+		"Saved":        c.Query("saved") == "1",
+	}); err != nil {
+		log.Printf("[web] birthday-settings template error: %v", err)
+		c.Status(http.StatusInternalServerError)
+	}
+}
+
+// handleUpdateBirthdaySettings saves the per-guild GIF query.
+func (s *Server) handleUpdateBirthdaySettings(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	if findGuild(sess.Guilds, guildID) == nil {
+		c.String(http.StatusForbidden, "Access denied.")
+		return
+	}
+
+	query := strings.TrimSpace(c.PostForm("gif_query"))
+	if mod, ok := s.bot.Modules()["birthday"]; ok {
+		if bm, ok := mod.(*birthday.Module); ok {
+			bm.SetGIFQuery(guildID, query)
+		}
+	}
+
+	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?saved=1")
 }
 
 func roleColorHex(c int) string {
