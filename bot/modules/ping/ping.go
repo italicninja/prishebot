@@ -5,6 +5,7 @@ package ping
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -31,10 +32,16 @@ func (m *Module) Commands() []*discordgo.ApplicationCommand {
 // HandleInteraction responds to the /ping command.
 func (m *Module) HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	latency := s.HeartbeatLatency().Milliseconds()
+	msg := fmt.Sprintf("🏓 Pong! `%dms`", latency)
+	if region := os.Getenv("RAILWAY_REPLICA_REGION"); region != "" {
+		msg += fmt.Sprintf(" · `%s`", region)
+	} else if region = os.Getenv("RAILWAY_REGION"); region != "" {
+		msg += fmt.Sprintf(" · `%s`", region)
+	}
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Content: fmt.Sprintf("🏓 Pong! `%dms`", latency),
+			Content: msg,
 		},
 	}); err != nil {
 		log.Printf("[ping] failed to respond to /ping: %v", err)

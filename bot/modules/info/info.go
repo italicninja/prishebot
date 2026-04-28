@@ -5,6 +5,7 @@ package info
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -97,6 +98,21 @@ func (m *Module) botInfo(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
 			URL: fmt.Sprintf("https://cdn.discordapp.com/avatars/%s/%s.png", self.ID, self.Avatar),
 		}
+	}
+	if env := os.Getenv("RAILWAY_ENVIRONMENT_NAME"); env != "" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name: "Environment", Value: fmt.Sprintf("`%s`", env), Inline: true,
+		})
+	}
+	if region := os.Getenv("RAILWAY_REPLICA_REGION"); region != "" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name: "Region", Value: fmt.Sprintf("`%s`", region), Inline: true,
+		})
+	}
+	if svc := os.Getenv("RAILWAY_SERVICE_NAME"); svc != "" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name: "Service", Value: fmt.Sprintf("`%s`", svc), Inline: true,
+		})
 	}
 
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
