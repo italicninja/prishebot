@@ -280,7 +280,9 @@ func (b *Bot) GuildModuleSettings(guildID string) map[string]bool {
 // interactions. It looks up which module owns the command and delegates to it,
 // first checking the per-guild enable/disable setting.
 func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.Type != discordgo.InteractionApplicationCommand {
+	switch i.Type {
+	case discordgo.InteractionApplicationCommand, discordgo.InteractionApplicationCommandAutocomplete:
+	default:
 		return
 	}
 
@@ -297,7 +299,10 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 
 	// Guild-specific enable/disable check. DM interactions have no GuildID.
 	if i.GuildID != "" && !b.IsModuleEnabled(i.GuildID, m.Name()) {
-		// Ephemeral means only the invoking user can see this response.
+		// For autocomplete we can't send a regular message response — just drop it.
+		if i.Type == discordgo.InteractionApplicationCommandAutocomplete {
+			return
+		}
 		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{

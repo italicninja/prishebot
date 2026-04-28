@@ -4,11 +4,16 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/gin-gonic/gin"
+
+	"github.com/user/discord-bot-skeleton/bot/modules/roles"
 )
 
 // ── Public handlers ──────────────────────────────────────────────────────────
@@ -261,6 +266,173 @@ func (s *Server) botGuildSet() map[string]bool {
 	return set
 }
 
+// handleRolesPage renders the admin page for managing self-assignable roles.
+func (s *Server) handleRolesPage(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	src := findGuild(sess.Guilds, guildID)
+	if src == nil {
+		c.String(http.StatusForbidden, "You don't have admin access to that server.")
+		return
+	}
+	guild := *src
+	guild.BotPresent = s.botGuildSet()[guildID]
+
+	// Fetch all Discord roles for this guild (for the "use existing" dropdown).
+	discordRoles, err := s.bot.Session().GuildRoles(guildID)
+	if err != nil {
+		log.Printf("[web] GuildRoles %s: %v", guildID, err)
+		c.String(http.StatusInternalServerError, "Could not fetch guild roles.")
+		return
+	}
+
+	// Exclude @everyone and bot-managed roles from the picker.
+	type DiscordRoleOption struct {
+		ID       string
+		Name     string
+		ColorHex string
+	}
+	var roleOptions []DiscordRoleOption
+	for _, r := range discordRoles {
+		if r.Name == "@everyone" || r.Managed {
+			continue
+		}
+		roleOptions = append(roleOptions, DiscordRoleOption{
+			ID:       r.ID,
+			Name:     r.Name,
+			ColorHex: roleColorHex(r.Color),
+		})
+	}
+
+	// Build view rows for already-configured assignable roles.
+	type RoleRow struct {
+		RoleID      string
+		Name        string
+		Description string
+		JoinMessage string
+		ColorHex    string
+	}
+	var assignedRows []RoleRow
+	if mod, ok := s.bot.Modules()["roles"]; ok {
+		if rm, ok := mod.(*roles.Module); ok {
+			for _, r := range rm.GuildRoles(guildID) {
+				assignedRows = append(assignedRows, RoleRow{
+					RoleID:      r.RoleID,
+					Name:        r.Name,
+					Description: r.Description,
+					JoinMessage: r.JoinMessage,
+					ColorHex:    roleColorHex(r.Color),
+				})
+			}
+		}
+	}
+
+	if err := s.tmpl.ExecuteTemplate(c.Writer, "roles.html", gin.H{
+		"User":          sess,
+		"Guild":         &guild,
+		"AssignedRoles": assignedRows,
+		"DiscordRoles":  roleOptions,
+		"ClientID":      s.cfg.ClientID,
+		"Error":         c.Query("error"),
+	}); err != nil {
+		log.Printf("[web] roles template error: %v", err)
+		c.Status(http.StatusInternalServerError)
+	}
+}
+
+// handleAddRole adds (or creates) a self-assignable role for a guild.
+func (s *Server) handleAddRole(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	if findGuild(sess.Guilds, guildID) == nil {
+		c.String(http.StatusForbidden, "Access denied.")
+		return
+	}
+
+	source := c.PostForm("source") // "existing" or "new"
+	description := strings.TrimSpace(c.PostForm("description"))
+	joinMsg := strings.TrimSpace(c.PostForm("join_message"))
+
+	var roleID, roleName string
+	var color int
+
+	switch source {
+	case "new":
+		name := strings.TrimSpace(c.PostForm("new_name"))
+		if name == "" {
+			c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/roles?error=name_required")
+			return
+		}
+		colorInt := parseHTMLColor(c.PostForm("new_color"))
+		params := discordRoleParams(name, colorInt)
+		created, err := s.bot.Session().GuildRoleCreate(guildID, &params)
+		if err != nil {
+			log.Printf("[web] GuildRoleCreate %s: %v", guildID, err)
+			c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/roles?error=create_failed")
+			return
+		}
+		roleID = created.ID
+		roleName = created.Name
+		color = colorInt
+
+	default: // "existing"
+		roleID = strings.TrimSpace(c.PostForm("role_id"))
+		if roleID == "" {
+			c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/roles?error=role_required")
+			return
+		}
+		discordRoles, _ := s.bot.Session().GuildRoles(guildID)
+		for _, r := range discordRoles {
+			if r.ID == roleID {
+				roleName = r.Name
+				color = r.Color
+				break
+			}
+		}
+		if roleName == "" {
+			c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/roles?error=role_not_found")
+			return
+		}
+	}
+
+	if mod, ok := s.bot.Modules()["roles"]; ok {
+		if rm, ok := mod.(*roles.Module); ok {
+			rm.AddRole(guildID, roles.AssignableRole{
+				RoleID:      roleID,
+				Name:        roleName,
+				Description: description,
+				JoinMessage: joinMsg,
+				Color:       color,
+			})
+		}
+	}
+
+	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/roles")
+}
+
+// handleDeleteRole removes a self-assignable role from a guild's config.
+// It does NOT delete the Discord role itself.
+func (s *Server) handleDeleteRole(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	if findGuild(sess.Guilds, guildID) == nil {
+		c.String(http.StatusForbidden, "Access denied.")
+		return
+	}
+
+	roleID := c.Param("roleID")
+	if mod, ok := s.bot.Modules()["roles"]; ok {
+		if rm, ok := mod.(*roles.Module); ok {
+			rm.RemoveRole(guildID, roleID)
+		}
+	}
+
+	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/roles")
+}
+
 // randomState produces a URL-safe random string used as OAuth2 CSRF state.
 // crypto/rand (not math/rand) is essential here — math/rand is predictable.
 func randomState() string {
@@ -269,4 +441,29 @@ func randomState() string {
 		panic("crypto/rand unavailable: " + err.Error())
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func roleColorHex(c int) string {
+	if c == 0 {
+		return "#99aab5"
+	}
+	return fmt.Sprintf("#%06x", c)
+}
+
+func parseHTMLColor(s string) int {
+	s = strings.TrimPrefix(s, "#")
+	if len(s) != 6 {
+		return 0
+	}
+	n, err := strconv.ParseInt(s, 16, 32)
+	if err != nil {
+		return 0
+	}
+	return int(n)
+}
+
+// discordRoleParams builds a RoleParams value for GuildRoleCreate.
+// Returned by value so we can take its address inline in a single expression.
+func discordRoleParams(name string, color int) discordgo.RoleParams {
+	return discordgo.RoleParams{Name: name, Color: &color}
 }

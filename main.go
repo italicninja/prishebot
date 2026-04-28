@@ -14,6 +14,7 @@ import (
 	"github.com/user/discord-bot-skeleton/bot/modules/birthday"
 	"github.com/user/discord-bot-skeleton/bot/modules/info"
 	"github.com/user/discord-bot-skeleton/bot/modules/ping"
+	"github.com/user/discord-bot-skeleton/bot/modules/roles"
 	"github.com/user/discord-bot-skeleton/config"
 	"github.com/user/discord-bot-skeleton/web"
 )
@@ -37,6 +38,9 @@ func main() {
 	}
 	if err := b.LoadModule(birthday.New(cfg.TenorAPIKey, cfg.BirthdayDataFile)); err != nil {
 		log.Fatalf("failed to load birthday module: %v", err)
+	}
+	if err := b.LoadModule(roles.New(cfg.RolesDataFile)); err != nil {
+		log.Fatalf("failed to load roles module: %v", err)
 	}
 
 	if err := b.Start(); err != nil {

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prishe — Roles · {{ .Guild.Name }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <span class="brand-icon">✦</span> Prishe
+    </div>
+    <div class="navbar-user">
+      <img class="avatar" src="{{ .User.AvatarURL }}" alt="{{ .User.Username }}">
+      <span>{{ .User.Username }}</span>
+      <a href="/logout" class="btn btn-ghost" style="padding:0.3rem 0.75rem;">Logout</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div style="margin-bottom:1.5rem;display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
+      <a href="/dashboard" class="btn btn-ghost">← Back to servers</a>
+      <a href="/dashboard/server/{{ .Guild.ID }}" class="btn btn-ghost">⚙ Module settings</a>
+    </div>
+
+    <div class="server-header">
+      {{ if .Guild.IconURL }}
+        <img class="server-header-icon" src="{{ .Guild.IconURL }}" alt="{{ .Guild.Name }}">
+      {{ else }}
+        <div class="server-header-icon-placeholder">{{ slice .Guild.Name 0 1 }}</div>
+      {{ end }}
+      <div class="server-header-info">
+        <h1>{{ .Guild.Name }}</h1>
+        <p>Self-assignable roles — users pick these up with <code>/role join</code></p>
+      </div>
+    </div>
+
+    {{ if .Error }}
+    <div class="error-banner">
+      {{ if eq .Error "name_required" }}Role name is required.
+      {{ else if eq .Error "role_required" }}Please select a role.
+      {{ else if eq .Error "role_not_found" }}That role no longer exists in this server.
+      {{ else if eq .Error "create_failed" }}Failed to create the role. Make sure Prishe has the <strong>Manage Roles</strong> permission.
+      {{ else }}Something went wrong. Please try again.
+      {{ end }}
+    </div>
+    {{ end }}
+
+    <!-- Current assignable roles -->
+    <section style="margin-bottom:2.5rem;">
+      <h2 style="font-size:1rem;margin-bottom:1rem;">Configured roles</h2>
+
+      {{ if not .AssignedRoles }}
+      <div class="empty" style="padding:2.5rem 1rem;">
+        <div class="empty-icon">🏷️</div>
+        <h2>No roles yet</h2>
+        <p>Add one below and users can sign up with <code>/role join</code>.</p>
+      </div>
+      {{ else }}
+      <div class="roles-list">
+        {{ range .AssignedRoles }}
+        <div class="role-row">
+          <div class="role-dot" style="background:{{ .ColorHex }};"></div>
+          <div class="role-info">
+            <strong>{{ .Name }}</strong>
+            {{ if .Description }}<span class="role-desc">{{ .Description }}</span>{{ end }}
+            {{ if .JoinMessage }}<span class="role-msg">💬 {{ .JoinMessage }}</span>{{ end }}
+          </div>
+          <form method="POST" action="/dashboard/server/{{ $.Guild.ID }}/roles/{{ .RoleID }}/delete"
+                onsubmit="return confirm('Remove {{ .Name }} from self-assignable roles? The Discord role itself will not be deleted.')">
+            <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+          </form>
+        </div>
+        {{ end }}
+      </div>
+      {{ end }}
+    </section>
+
+    <!-- Add role form -->
+    <section>
+      <h2 style="font-size:1rem;margin-bottom:1rem;">Add a role</h2>
+      <div class="card">
+        <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/roles" id="add-role-form">
+
+          <!-- Source toggle -->
+          <div class="form-row">
+            <label class="radio-option">
+              <input type="radio" name="source" value="existing" checked onchange="toggleSource(this.value)">
+              <span>Use an existing Discord role</span>
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="source" value="new" onchange="toggleSource(this.value)">
+              <span>Create a new role</span>
+            </label>
+          </div>
+
+          <!-- Existing role picker -->
+          <div id="existing-section" class="form-field">
+            <label for="role_id">Role</label>
+            {{ if not .DiscordRoles }}
+            <p style="color:var(--text-muted);font-size:0.85rem;">No roles found in this server.</p>
+            {{ else }}
+            <select name="role_id" id="role_id" class="form-select">
+              <option value="">— pick a role —</option>
+              {{ range .DiscordRoles }}
+              <option value="{{ .ID }}">
+                {{ .Name }}
+              </option>
+              {{ end }}
+            </select>
+            {{ end }}
+          </div>
+
+          <!-- New role fields -->
+          <div id="new-section" class="form-field" style="display:none;">
+            <div style="display:grid;grid-template-columns:1fr auto;gap:0.75rem;align-items:end;">
+              <div>
+                <label for="new_name">Role name</label>
+                <input type="text" name="new_name" id="new_name" class="form-input" placeholder="e.g. Announcements">
+              </div>
+              <div>
+                <label for="new_color">Color</label>
+                <input type="color" name="new_color" id="new_color" value="#5865f2" class="form-color">
+              </div>
+            </div>
+          </div>
+
+          <!-- Description -->
+          <div class="form-field">
+            <label for="description">Description <span class="label-hint">(shown in /role list)</span></label>
+            <input type="text" name="description" id="description" class="form-input"
+                   placeholder="e.g. Get notified about server announcements" maxlength="200">
+          </div>
+
+          <!-- Join message -->
+          <div class="form-field">
+            <label for="join_message">Join message <span class="label-hint">(sent to user on assignment — leave blank for default)</span></label>
+            <textarea name="join_message" id="join_message" class="form-textarea" rows="2"
+                      placeholder="✅ You're all set! Welcome to the Announcements crew."></textarea>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Add role</button>
+          </div>
+        </form>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    function toggleSource(val) {
+      document.getElementById('existing-section').style.display = val === 'existing' ? '' : 'none';
+      document.getElementById('new-section').style.display = val === 'new' ? '' : 'none';
+    }
+  </script>
+
+</body>
+</html>
