@@ -1,7 +1,7 @@
 // Package raid provides FF14-style raid sign-ups backed by button interactions.
 // The standard 8-person party composition is: 2 Tank, 2 Healer, 2 Melee DPS,
 // 1 Ranged DPS, 1 Caster DPS. Members sign up by clicking role buttons on the
-// posted embed; the embed updates in real time as slots are filled.
+// posted embed, then choosing their specific job from a dropdown.
 package raid
 
 import (
@@ -18,27 +18,70 @@ import (
 
 // slotDef describes one role group in the FF14 party composition.
 type slotDef struct {
-	role     string
-	label    string
-	emoji    string
-	max      int
-	style    discordgo.ButtonStyle
-	iconFile string // filename under the icons directory, e.g. "role-tank.png"
+	role    string
+	label   string
+	emoji   string
+	max     int
+	style   discordgo.ButtonStyle
+	iconURL string // xivapi.com role icon URL used as embed thumbnail
 }
 
 // stdComp is the FF14 full-party (8-person) standard composition.
 var stdComp = []slotDef{
-	{"tank",   "Tank",       "🛡️", 2, discordgo.PrimaryButton,   "role-tank.png"},
-	{"healer", "Healer",     "💚", 2, discordgo.SuccessButton,   "role-healer.png"},
-	{"melee",  "Melee DPS",  "⚔️", 2, discordgo.DangerButton,   "role-melee.png"},
-	{"ranged", "Ranged DPS", "🏹", 1, discordgo.SecondaryButton, "role-ranged.png"},
-	{"caster", "Caster DPS", "🔮", 1, discordgo.PrimaryButton,   "role-dps.png"},
+	{"tank",   "Tank",       "🛡️", 2, discordgo.PrimaryButton,   "https://xivapi.com/i/062000/062581.png"},
+	{"healer", "Healer",     "💚", 2, discordgo.SuccessButton,   "https://xivapi.com/i/062000/062582.png"},
+	{"melee",  "Melee DPS",  "⚔️", 2, discordgo.DangerButton,   "https://xivapi.com/i/062000/062583.png"},
+	{"ranged", "Ranged DPS", "🏹", 1, discordgo.SecondaryButton, "https://xivapi.com/i/062000/062584.png"},
+	{"caster", "Caster DPS", "🔮", 1, discordgo.PrimaryButton,   "https://xivapi.com/i/062000/062585.png"},
+}
+
+// jobDef is one specific FF14 job within a role.
+type jobDef struct {
+	key     string // used in custom IDs and JSON
+	name    string // display name
+	iconURL string // xivapi.com job icon URL (empty = use role icon)
+}
+
+// jobsByRole maps each role to the jobs players can choose from.
+var jobsByRole = map[string][]jobDef{
+	"tank": {
+		{"paladin",    "Paladin",    "https://xivapi.com/cj/1/paladin.png"},
+		{"warrior",    "Warrior",    "https://xivapi.com/cj/1/warrior.png"},
+		{"darkknight", "Dark Knight","https://xivapi.com/cj/1/darkknight.png"},
+		{"gunbreaker", "Gunbreaker", "https://xivapi.com/cj/1/gunbreaker.png"},
+	},
+	"healer": {
+		{"whitemage",    "White Mage",   "https://xivapi.com/cj/1/whitemage.png"},
+		{"scholar",      "Scholar",      "https://xivapi.com/cj/1/scholar.png"},
+		{"astrologian",  "Astrologian",  "https://xivapi.com/cj/1/astrologian.png"},
+		{"sage",         "Sage",         "https://xivapi.com/cj/1/sage.png"},
+	},
+	"melee": {
+		{"monk",    "Monk",    "https://xivapi.com/cj/1/monk.png"},
+		{"dragoon", "Dragoon", "https://xivapi.com/cj/1/dragoon.png"},
+		{"ninja",   "Ninja",   "https://xivapi.com/cj/1/ninja.png"},
+		{"samurai", "Samurai", "https://xivapi.com/cj/1/samurai.png"},
+		{"reaper",  "Reaper",  "https://xivapi.com/cj/1/reaper.png"},
+		{"viper",   "Viper",   "https://xivapi.com/cj/1/viper.png"},
+	},
+	"ranged": {
+		{"bard",      "Bard",      "https://xivapi.com/cj/1/bard.png"},
+		{"machinist", "Machinist", "https://xivapi.com/cj/1/machinist.png"},
+		{"dancer",    "Dancer",    "https://xivapi.com/cj/1/dancer.png"},
+	},
+	"caster": {
+		{"blackmage",    "Black Mage",   "https://xivapi.com/cj/1/blackmage.png"},
+		{"summoner",     "Summoner",     "https://xivapi.com/cj/1/summoner.png"},
+		{"redmage",      "Red Mage",     "https://xivapi.com/cj/1/redmage.png"},
+		{"pictomancer",  "Pictomancer",  "https://xivapi.com/cj/1/pictomancer.png"},
+	},
 }
 
 // Signee is a player who has claimed a slot.
 type Signee struct {
 	UserID      string `json:"user_id"`
 	DisplayName string `json:"display_name"`
+	Job         string `json:"job,omitempty"` // jobDef.key, e.g. "paladin"
 }
 
 // Slot is one position in the party (e.g. "Tank slot 1").
@@ -55,7 +98,7 @@ type Raid struct {
 	MessageID   string `json:"message_id"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
-	UnixTime    int64  `json:"unix_time,omitempty"` // scheduled time as Unix timestamp; 0 = not set
+	UnixTime    int64  `json:"unix_time,omitempty"`
 	CreatorID   string `json:"creator_id"`
 	Slots       []Slot `json:"slots"`
 	Closed      bool   `json:"closed"`
@@ -84,18 +127,13 @@ func newSlots() []Slot {
 // Module implements bot.Module for raid sign-ups.
 type Module struct {
 	dataFile string
-	// iconBase is the public base URL for the web server (e.g. "https://mybot.railway.app").
-	// When non-empty, role icons are shown as Discord embed thumbnails using
-	// locally-hosted paths. When empty, the embed falls back to emoji-only display.
-	iconBase string
 	mu       sync.Mutex
 	raids    map[string]*Raid // key: raidID
 }
 
-func New(dataFile, iconBase string) *Module {
+func New(dataFile string) *Module {
 	return &Module{
 		dataFile: dataFile,
-		iconBase: iconBase,
 		raids:    make(map[string]*Raid),
 	}
 }
@@ -211,7 +249,7 @@ func (m *Module) handleCreate(s *discordgo.Session, i *discordgo.InteractionCrea
 		Slots:       newSlots(),
 	}
 
-	embed := buildEmbed(raid, m.iconBase)
+	embed := buildEmbed(raid)
 	components := buildComponents(raid)
 
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -225,7 +263,6 @@ func (m *Module) handleCreate(s *discordgo.Session, i *discordgo.InteractionCrea
 		return
 	}
 
-	// Fetch the posted message to save its ID for future edits.
 	msg, err := s.InteractionResponse(i.Interaction)
 	if err != nil {
 		log.Printf("[raid] failed to fetch interaction response: %v", err)
@@ -269,7 +306,7 @@ func (m *Module) handleClose(s *discordgo.Session, i *discordgo.InteractionCreat
 	}
 
 	raid.Closed = true
-	embed := buildEmbed(raid, m.iconBase)
+	embed := buildEmbed(raid)
 	components := buildComponents(raid)
 	channelID := raid.ChannelID
 	messageID := raid.MessageID
@@ -336,10 +373,13 @@ func (m *Module) handleList(s *discordgo.Session, i *discordgo.InteractionCreate
 	}
 }
 
-// ── Component (button) handlers ───────────────────────────────────────────────
+// ── Component (button / select menu) handlers ─────────────────────────────────
 
 func (m *Module) handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	// Custom ID format: "raid:<action>:<raidID>[:<role>]"
+	// Custom ID formats:
+	//   "raid:join:<raidID>:<role>"      — role button clicked
+	//   "raid:select:<raidID>:<role>"    — job select menu submitted
+	//   "raid:withdraw:<raidID>"         — withdraw button clicked
 	parts := strings.SplitN(i.MessageComponentData().CustomID, ":", 4)
 	if len(parts) < 3 {
 		return
@@ -353,11 +393,17 @@ func (m *Module) handleComponent(s *discordgo.Session, i *discordgo.InteractionC
 			return
 		}
 		m.handleJoin(s, i, raidID, parts[3])
+	case "select":
+		if len(parts) < 4 {
+			return
+		}
+		m.handleJobSelect(s, i, raidID, parts[3])
 	case "withdraw":
 		m.handleWithdraw(s, i, raidID)
 	}
 }
 
+// handleJoin validates the slot is available and shows an ephemeral job picker.
 func (m *Module) handleJoin(s *discordgo.Session, i *discordgo.InteractionCreate, raidID, role string) {
 	user := i.Member.User
 
@@ -373,8 +419,6 @@ func (m *Module) handleJoin(s *discordgo.Session, i *discordgo.InteractionCreate
 		ephemeralRespond(s, i, "Sign-ups for this raid are closed.")
 		return
 	}
-
-	// Reject if already signed up anywhere in this raid.
 	for _, sl := range raid.Slots {
 		if sl.Signee != nil && sl.Signee.UserID == user.ID {
 			m.mu.Unlock()
@@ -382,8 +426,94 @@ func (m *Module) handleJoin(s *discordgo.Session, i *discordgo.InteractionCreate
 			return
 		}
 	}
+	// Count available slots for this role.
+	available := 0
+	for _, sl := range raid.Slots {
+		if sl.Role == role && sl.Signee == nil {
+			available++
+		}
+	}
+	m.mu.Unlock()
 
-	// Claim the first empty slot for the requested role.
+	if available == 0 {
+		ephemeralRespond(s, i, fmt.Sprintf("All **%s** slots are taken!", roleName(role)))
+		return
+	}
+
+	// Build the job dropdown for this role.
+	jobs := jobsByRole[role]
+	options := make([]discordgo.SelectMenuOption, 0, len(jobs))
+	for _, j := range jobs {
+		options = append(options, discordgo.SelectMenuOption{
+			Label: j.name,
+			Value: j.key,
+		})
+	}
+
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: fmt.Sprintf("Choose your **%s** job:", roleName(role)),
+			Flags:   discordgo.MessageFlagsEphemeral,
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.SelectMenu{
+							CustomID:    fmt.Sprintf("raid:select:%s:%s", raidID, role),
+							Placeholder: "Select a job…",
+							Options:     options,
+						},
+					},
+				},
+			},
+		},
+	}); err != nil {
+		log.Printf("[raid] join respond error: %v", err)
+	}
+}
+
+// handleJobSelect processes the job dropdown selection and claims the slot.
+func (m *Module) handleJobSelect(s *discordgo.Session, i *discordgo.InteractionCreate, raidID, role string) {
+	values := i.MessageComponentData().Values
+	if len(values) == 0 {
+		return
+	}
+	jobKey := values[0]
+
+	// Resolve display name for the selected job.
+	jobLabel := jobKey
+	var jobIconURL string
+	for _, j := range jobsByRole[role] {
+		if j.key == jobKey {
+			jobLabel = j.name
+			jobIconURL = j.iconURL
+			break
+		}
+	}
+	_ = jobIconURL // available for future use (e.g. author icon)
+
+	user := i.Member.User
+
+	m.mu.Lock()
+	raid, ok := m.raids[raidID]
+	if !ok || raid.GuildID != i.GuildID {
+		m.mu.Unlock()
+		updateEphemeral(s, i, "❌ Raid not found.")
+		return
+	}
+	if raid.Closed {
+		m.mu.Unlock()
+		updateEphemeral(s, i, "Sign-ups for this raid are closed.")
+		return
+	}
+	for _, sl := range raid.Slots {
+		if sl.Signee != nil && sl.Signee.UserID == user.ID {
+			m.mu.Unlock()
+			updateEphemeral(s, i, "You're already signed up. Click 🚪 **Withdraw** first to switch roles.")
+			return
+		}
+	}
+
 	claimed := false
 	for idx := range raid.Slots {
 		if raid.Slots[idx].Role == role && raid.Slots[idx].Signee == nil {
@@ -394,6 +524,7 @@ func (m *Module) handleJoin(s *discordgo.Session, i *discordgo.InteractionCreate
 			raid.Slots[idx].Signee = &Signee{
 				UserID:      user.ID,
 				DisplayName: displayName,
+				Job:         jobKey,
 			}
 			claimed = true
 			break
@@ -401,7 +532,7 @@ func (m *Module) handleJoin(s *discordgo.Session, i *discordgo.InteractionCreate
 	}
 	if !claimed {
 		m.mu.Unlock()
-		ephemeralRespond(s, i, fmt.Sprintf("All **%s** slots are taken!", roleName(role)))
+		updateEphemeral(s, i, fmt.Sprintf("All **%s** slots were just taken!", roleName(role)))
 		return
 	}
 
@@ -409,8 +540,7 @@ func (m *Module) handleJoin(s *discordgo.Session, i *discordgo.InteractionCreate
 		raid.Closed = true
 	}
 
-	// Build updated embed/components while still holding the lock.
-	embed := buildEmbed(raid, m.iconBase)
+	embed := buildEmbed(raid)
 	components := buildComponents(raid)
 	channelID := raid.ChannelID
 	messageID := raid.MessageID
@@ -424,14 +554,14 @@ func (m *Module) handleJoin(s *discordgo.Session, i *discordgo.InteractionCreate
 		Embeds:     &[]*discordgo.MessageEmbed{embed},
 		Components: &components,
 	}); err != nil {
-		log.Printf("[raid] failed to update embed after join: %v", err)
+		log.Printf("[raid] failed to update embed after job select: %v", err)
 	}
 
-	msg := fmt.Sprintf("✅ Signed up as **%s**!", roleName(role))
+	msg := fmt.Sprintf("✅ Signed up as **%s**!", jobLabel)
 	if closed {
 		msg += "\n🔒 The raid is now full — sign-ups are closed."
 	}
-	ephemeralRespond(s, i, msg)
+	updateEphemeral(s, i, msg)
 }
 
 func (m *Module) handleWithdraw(s *discordgo.Session, i *discordgo.InteractionCreate, raidID string) {
@@ -464,7 +594,7 @@ func (m *Module) handleWithdraw(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 
-	embed := buildEmbed(raid, m.iconBase)
+	embed := buildEmbed(raid)
 	components := buildComponents(raid)
 	channelID := raid.ChannelID
 	messageID := raid.MessageID
@@ -485,7 +615,7 @@ func (m *Module) handleWithdraw(s *discordgo.Session, i *discordgo.InteractionCr
 
 // ── Embed & component builders ────────────────────────────────────────────────
 
-func buildEmbed(raid *Raid, iconBase string) *discordgo.MessageEmbed {
+func buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 	filledByRole := map[string]int{}
 	for _, sl := range raid.Slots {
 		if sl.Signee != nil {
@@ -494,6 +624,16 @@ func buildEmbed(raid *Raid, iconBase string) *discordgo.MessageEmbed {
 	}
 
 	var fields []*discordgo.MessageEmbedField
+
+	// Date field sits above the roster.
+	if raid.UnixTime != 0 {
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   "📅 Date",
+			Value:  fmt.Sprintf("<t:%d:F> (<t:%d:R>)", raid.UnixTime, raid.UnixTime),
+			Inline: false,
+		})
+	}
+
 	for _, def := range stdComp {
 		var lines []string
 		for _, sl := range raid.Slots {
@@ -501,7 +641,11 @@ func buildEmbed(raid *Raid, iconBase string) *discordgo.MessageEmbed {
 				continue
 			}
 			if sl.Signee != nil {
-				lines = append(lines, fmt.Sprintf("<@%s>", sl.Signee.UserID))
+				line := fmt.Sprintf("<@%s>", sl.Signee.UserID)
+				if sl.Signee.Job != "" {
+					line += " — " + jobName(sl.Signee.Job)
+				}
+				lines = append(lines, line)
 			} else {
 				lines = append(lines, "*(open)*")
 			}
@@ -518,41 +662,25 @@ func buildEmbed(raid *Raid, iconBase string) *discordgo.MessageEmbed {
 		title = "🔒 Raid Closed: " + raid.Title
 	}
 
-	// Prepend the date field so it sits at the top of the field list.
-	if raid.UnixTime != 0 {
-		fields = append([]*discordgo.MessageEmbedField{
-			{
-				Name:   "📅 Date",
-				Value:  fmt.Sprintf("<t:%d:F> (<t:%d:R>)", raid.UnixTime, raid.UnixTime),
-				Inline: false,
-			},
-		}, fields...)
-	}
-
 	embed := &discordgo.MessageEmbed{
 		Title:  title,
 		Color:  0x1E3A5F,
 		Fields: fields,
+		Footer: &discordgo.MessageEmbedFooter{Text: "ID: " + raid.ID},
 	}
 	if raid.Description != "" {
 		embed.Description = raid.Description
 	}
 
-	// When the bot has a public base URL and locally-hosted icons, show the
-	// icon for the first role that still has open slots as the embed thumbnail.
-	// This gives a quick visual signal about what role is most needed.
-	if iconBase != "" && !raid.Closed {
+	// Thumbnail: icon of the first role that still needs players.
+	if !raid.Closed {
 		for _, def := range stdComp {
 			if filledByRole[def.role] < def.max {
-				embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
-					URL: iconBase + "/icons/" + def.iconFile,
-				}
+				embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: def.iconURL}
 				break
 			}
 		}
 	}
-
-	embed.Footer = &discordgo.MessageEmbedFooter{Text: "ID: " + raid.ID}
 
 	return embed
 }
@@ -643,6 +771,18 @@ func roleName(role string) string {
 	return role
 }
 
+// jobName returns the display name for a job key, searching all roles.
+func jobName(key string) string {
+	for _, jobs := range jobsByRole {
+		for _, j := range jobs {
+			if j.key == key {
+				return j.name
+			}
+		}
+	}
+	return key
+}
+
 func newID() string {
 	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
@@ -661,5 +801,19 @@ func ephemeralRespond(s *discordgo.Session, i *discordgo.InteractionCreate, cont
 		},
 	}); err != nil {
 		log.Printf("[raid] respond error: %v", err)
+	}
+}
+
+// updateEphemeral edits the existing ephemeral message in-place (used to
+// replace the job select dropdown with a confirmation or error message).
+func updateEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Content:    content,
+			Components: []discordgo.MessageComponent{},
+		},
+	}); err != nil {
+		log.Printf("[raid] update ephemeral error: %v", err)
 	}
 }
