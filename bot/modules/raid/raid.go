@@ -55,7 +55,7 @@ type Raid struct {
 	MessageID   string `json:"message_id"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
-	Date        string `json:"date"`
+	UnixTime    int64  `json:"unix_time,omitempty"` // scheduled time as Unix timestamp; 0 = not set
 	CreatorID   string `json:"creator_id"`
 	Slots       []Slot `json:"slots"`
 	Closed      bool   `json:"closed"`
@@ -127,9 +127,9 @@ func (m *Module) Commands() []*discordgo.ApplicationCommand {
 							Required:    false,
 						},
 						{
-							Type:        discordgo.ApplicationCommandOptionString,
+							Type:        discordgo.ApplicationCommandOptionInteger,
 							Name:        "date",
-							Description: "When the raid is scheduled (e.g. \"Saturday 8 PM EST\")",
+							Description: "Scheduled time as a Unix timestamp (e.g. from epochconverter.com)",
 							Required:    false,
 						},
 					},
@@ -186,7 +186,8 @@ func (m *Module) HandleInteraction(s *discordgo.Session, i *discordgo.Interactio
 // ── Slash command handlers ────────────────────────────────────────────────────
 
 func (m *Module) handleCreate(s *discordgo.Session, i *discordgo.InteractionCreate, sub *discordgo.ApplicationCommandInteractionDataOption) {
-	var title, description, date string
+	var title, description string
+	var unixTime int64
 	for _, opt := range sub.Options {
 		switch opt.Name {
 		case "title":
@@ -194,7 +195,7 @@ func (m *Module) handleCreate(s *discordgo.Session, i *discordgo.InteractionCrea
 		case "description":
 			description = opt.StringValue()
 		case "date":
-			date = opt.StringValue()
+			unixTime = opt.IntValue()
 		}
 	}
 
@@ -205,7 +206,7 @@ func (m *Module) handleCreate(s *discordgo.Session, i *discordgo.InteractionCrea
 		ChannelID:   i.ChannelID,
 		Title:       title,
 		Description: description,
-		Date:        date,
+		UnixTime:    unixTime,
 		CreatorID:   i.Member.User.ID,
 		Slots:       newSlots(),
 	}
@@ -312,8 +313,8 @@ func (m *Module) handleList(s *discordgo.Session, i *discordgo.InteractionCreate
 			}
 		}
 		fmt.Fprintf(&sb, "**%s** — %d/8 signed up", r.Title, filled)
-		if r.Date != "" {
-			fmt.Fprintf(&sb, " • 📅 %s", r.Date)
+		if r.UnixTime != 0 {
+			fmt.Fprintf(&sb, "\n📅 <t:%d:F> (<t:%d:R>)", r.UnixTime, r.UnixTime)
 		}
 		fmt.Fprintf(&sb, "\n`ID: %s`\n\n", r.ID)
 	}
@@ -517,6 +518,17 @@ func buildEmbed(raid *Raid, iconBase string) *discordgo.MessageEmbed {
 		title = "🔒 Raid Closed: " + raid.Title
 	}
 
+	// Prepend the date field so it sits at the top of the field list.
+	if raid.UnixTime != 0 {
+		fields = append([]*discordgo.MessageEmbedField{
+			{
+				Name:   "📅 Date",
+				Value:  fmt.Sprintf("<t:%d:F> (<t:%d:R>)", raid.UnixTime, raid.UnixTime),
+				Inline: false,
+			},
+		}, fields...)
+	}
+
 	embed := &discordgo.MessageEmbed{
 		Title:  title,
 		Color:  0x1E3A5F,
@@ -540,11 +552,7 @@ func buildEmbed(raid *Raid, iconBase string) *discordgo.MessageEmbed {
 		}
 	}
 
-	footer := "ID: " + raid.ID
-	if raid.Date != "" {
-		footer += " • 📅 " + raid.Date
-	}
-	embed.Footer = &discordgo.MessageEmbedFooter{Text: footer}
+	embed.Footer = &discordgo.MessageEmbedFooter{Text: "ID: " + raid.ID}
 
 	return embed
 }
