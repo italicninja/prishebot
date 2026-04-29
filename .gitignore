@@ -1,3 +1,6 @@
 .env
 birthdays.json
 roles.json
+raids.json
+*.exe
+web/static/icons/
