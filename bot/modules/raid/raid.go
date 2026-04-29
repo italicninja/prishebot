@@ -155,6 +155,29 @@ func (r *Raid) nextNum() int {
 	return r.NextNumber
 }
 
+// popMainSlot removes the user from the main roster and returns their Signee,
+// or nil if they were not in the main roster.
+func (r *Raid) popMainSlot(userID string) *Signee {
+	for idx, sl := range r.Slots {
+		if sl.Signee != nil && sl.Signee.UserID == userID {
+			s := sl.Signee
+			r.Slots[idx].Signee = nil
+			return s
+		}
+	}
+	return nil
+}
+
+// findStatusEntry returns a pointer to the user's StatusEntry, or nil.
+func (r *Raid) findStatusEntry(userID string) *StatusEntry {
+	for i := range r.StatusEntries {
+		if r.StatusEntries[i].UserID == userID {
+			return &r.StatusEntries[i]
+		}
+	}
+	return nil
+}
+
 func newSlots() []Slot {
 	slots := make([]Slot, 0, 8)
 	for _, def := range stdComp {
@@ -684,11 +707,38 @@ func (m *Module) handleBench(s *discordgo.Session, i *discordgo.InteractionCreat
 		ephemeralRespond(s, i, "Sign-ups for this raid are closed.")
 		return
 	}
-	if raid.findUserAnywhere(user.ID) {
+	// Already on bench — nothing to do.
+	if se := raid.findStatusEntry(user.ID); se != nil {
+		if se.Type == "bench" {
+			m.mu.Unlock()
+			ephemeralRespond(s, i, "You're already on bench.")
+			return
+		}
 		m.mu.Unlock()
-		ephemeralRespond(s, i, "You're already registered. Click **Withdraw** first to change.")
+		ephemeralRespond(s, i, fmt.Sprintf("You're already marked as **%s**. Click **Withdraw** first to change.", se.Type))
 		return
 	}
+
+	// Already in main roster — move to bench, keep job.
+	if signee := raid.popMainSlot(user.ID); signee != nil {
+		raid.StatusEntries = append(raid.StatusEntries, StatusEntry{
+			UserID: signee.UserID, DisplayName: signee.DisplayName,
+			Job: signee.Job, Type: "bench", Number: signee.Number,
+		})
+		embed := m.buildEmbed(raid)
+		components := m.buildComponents(raid)
+		channelID, messageID := raid.ChannelID, raid.MessageID
+		m.mu.Unlock()
+		m.save()
+		s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel: channelID, ID: messageID,
+			Embeds: &[]*discordgo.MessageEmbed{embed}, Components: &components,
+		})
+		ephemeralRespond(s, i, "🪑 Moved to bench. Your slot is now open for others.")
+		return
+	}
+
+	// Not registered — show job picker.
 	m.mu.Unlock()
 	m.showJobSelect(s, i, "raid:selectbench:"+raidID, "Choose your job for **Bench**:", allJobs)
 }
@@ -799,11 +849,38 @@ func (m *Module) handleTentative(s *discordgo.Session, i *discordgo.InteractionC
 		ephemeralRespond(s, i, "Sign-ups for this raid are closed.")
 		return
 	}
-	if raid.findUserAnywhere(user.ID) {
+	// Already tentative — nothing to do.
+	if se := raid.findStatusEntry(user.ID); se != nil {
+		if se.Type == "tentative" {
+			m.mu.Unlock()
+			ephemeralRespond(s, i, "You're already marked as tentative.")
+			return
+		}
 		m.mu.Unlock()
-		ephemeralRespond(s, i, "You're already registered. Click **Withdraw** first to change.")
+		ephemeralRespond(s, i, fmt.Sprintf("You're already marked as **%s**. Click **Withdraw** first to change.", se.Type))
 		return
 	}
+
+	// Already in main roster — move to tentative, keep job.
+	if signee := raid.popMainSlot(user.ID); signee != nil {
+		raid.StatusEntries = append(raid.StatusEntries, StatusEntry{
+			UserID: signee.UserID, DisplayName: signee.DisplayName,
+			Job: signee.Job, Type: "tentative", Number: signee.Number,
+		})
+		embed := m.buildEmbed(raid)
+		components := m.buildComponents(raid)
+		channelID, messageID := raid.ChannelID, raid.MessageID
+		m.mu.Unlock()
+		m.save()
+		s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel: channelID, ID: messageID,
+			Embeds: &[]*discordgo.MessageEmbed{embed}, Components: &components,
+		})
+		ephemeralRespond(s, i, "⚖️ Moved to tentative. Your slot is now open for others.")
+		return
+	}
+
+	// Not registered — show job picker.
 	m.mu.Unlock()
 	m.showJobSelect(s, i, "raid:selecttent:"+raidID, "Choose your job for **Tentative**:", allJobs)
 }
@@ -867,27 +944,53 @@ func (m *Module) handleAbsence(s *discordgo.Session, i *discordgo.InteractionCre
 		return
 	}
 	// Toggle off if already absent.
-	for idx, se := range raid.StatusEntries {
-		if se.UserID == user.ID && se.Type == "absence" {
-			raid.StatusEntries = append(raid.StatusEntries[:idx], raid.StatusEntries[idx+1:]...)
-			embed := m.buildEmbed(raid)
-			components := m.buildComponents(raid)
-			channelID, messageID := raid.ChannelID, raid.MessageID
-			m.mu.Unlock()
-			m.save()
-			s.ChannelMessageEditComplex(&discordgo.MessageEdit{
-				Channel: channelID, ID: messageID,
-				Embeds: &[]*discordgo.MessageEmbed{embed}, Components: &components,
-			})
-			ephemeralRespond(s, i, "✅ Absence removed.")
-			return
+	if se := raid.findStatusEntry(user.ID); se != nil && se.Type == "absence" {
+		for idx, entry := range raid.StatusEntries {
+			if entry.UserID == user.ID {
+				raid.StatusEntries = append(raid.StatusEntries[:idx], raid.StatusEntries[idx+1:]...)
+				break
+			}
 		}
-	}
-	if raid.findUserAnywhere(user.ID) {
+		embed := m.buildEmbed(raid)
+		components := m.buildComponents(raid)
+		channelID, messageID := raid.ChannelID, raid.MessageID
 		m.mu.Unlock()
-		ephemeralRespond(s, i, "You're already registered. Click **Withdraw** first to change.")
+		m.save()
+		s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel: channelID, ID: messageID,
+			Embeds: &[]*discordgo.MessageEmbed{embed}, Components: &components,
+		})
+		ephemeralRespond(s, i, "✅ Absence removed.")
 		return
 	}
+
+	// Already in a different status — block.
+	if se := raid.findStatusEntry(user.ID); se != nil {
+		m.mu.Unlock()
+		ephemeralRespond(s, i, fmt.Sprintf("You're already marked as **%s**. Click **Withdraw** first to change.", se.Type))
+		return
+	}
+
+	// Already in main roster — move to absence, keep job.
+	if signee := raid.popMainSlot(user.ID); signee != nil {
+		raid.StatusEntries = append(raid.StatusEntries, StatusEntry{
+			UserID: signee.UserID, DisplayName: signee.DisplayName,
+			Job: signee.Job, Type: "absence", Number: signee.Number,
+		})
+		embed := m.buildEmbed(raid)
+		components := m.buildComponents(raid)
+		channelID, messageID := raid.ChannelID, raid.MessageID
+		m.mu.Unlock()
+		m.save()
+		s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel: channelID, ID: messageID,
+			Embeds: &[]*discordgo.MessageEmbed{embed}, Components: &components,
+		})
+		ephemeralRespond(s, i, "❌ Marked as **absent**. Your slot has been freed.")
+		return
+	}
+
+	// Not registered at all — add to absence.
 	raid.StatusEntries = append(raid.StatusEntries, StatusEntry{
 		UserID: user.ID, DisplayName: displayName(user),
 		Type: "absence", Number: raid.nextNum(),
