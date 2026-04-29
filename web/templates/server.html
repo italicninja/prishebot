@@ -45,57 +45,96 @@
       </a>
     </div>
     {{ else }}
-    <div class="leave-banner">
-      <div>
-        <strong>Remove Prishe from this server</strong>
-        <p>She will leave immediately and all module settings for this server will be lost.</p>
-      </div>
-      <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/leave"
-            onsubmit="return confirm('Remove Prishe from {{ .Guild.Name }}? This cannot be undone.')">
-        <button type="submit" class="btn btn-danger">Leave Server</button>
-      </form>
+
+    <div class="tabs" role="tablist">
+      <button class="tab active" role="tab" aria-selected="true"  data-tab="settings">⚙️ Settings</button>
+      <button class="tab tab-danger"  role="tab" aria-selected="false" data-tab="danger">⚠️ Danger Zone</button>
     </div>
-    {{ end }}
 
-    {{ if .Guild.BotPresent }}
-    <div style="margin-bottom:1.5rem;display:flex;gap:0.75rem;flex-wrap:wrap;">
-      <a href="/dashboard/server/{{ .Guild.ID }}/roles" class="btn btn-ghost">🏷️ Self-assignable roles</a>
-      <a href="/dashboard/server/{{ .Guild.ID }}/birthday" class="btn btn-ghost">🎂 Birthday settings</a>
-    </div>
-    {{ end }}
+    <!-- ── Settings tab ─────────────────────────────────────────────────── -->
+    <div id="tab-settings" class="tab-panel" role="tabpanel">
 
-    <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/modules">
-      <h2 style="margin-bottom:1rem;font-size:1.1rem;">Modules</h2>
-
-      {{ if not .Modules }}
-      <div class="empty">
-        <div class="empty-icon">📦</div>
-        <h2>No modules loaded</h2>
-        <p>Add modules in <code>main.go</code> to see them here.</p>
+      <div style="margin-bottom:1.5rem;display:flex;gap:0.75rem;flex-wrap:wrap;">
+        <a href="/dashboard/server/{{ .Guild.ID }}/roles" class="btn btn-ghost">🏷️ Self-assignable roles</a>
+        <a href="/dashboard/server/{{ .Guild.ID }}/birthday" class="btn btn-ghost">🎂 Birthday settings</a>
       </div>
-      {{ else }}
-      <div class="modules-list">
-        {{ range .Modules }}
-        <div class="module-row">
-          <div class="module-info">
-            <h3>{{ .Name }}</h3>
-            <p>{{ .Description }}</p>
+
+      <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/modules">
+        <h2 style="margin-bottom:1rem;font-size:1.1rem;">Modules</h2>
+
+        {{ if not .Modules }}
+        <div class="empty">
+          <div class="empty-icon">📦</div>
+          <h2>No modules loaded</h2>
+          <p>Add modules in <code>main.go</code> to see them here.</p>
+        </div>
+        {{ else }}
+        <div class="modules-list">
+          {{ range .Modules }}
+          <div class="module-row">
+            <div class="module-info">
+              <h3>{{ .Name }}</h3>
+              <p>{{ .Description }}</p>
+            </div>
+            <label class="toggle" title="Toggle {{ .Name }}">
+              <input type="checkbox" name="module_{{ .Name }}"{{ if .Enabled }} checked{{ end }}>
+              <span class="toggle-slider"></span>
+            </label>
           </div>
-          <label class="toggle" title="Toggle {{ .Name }}">
-            <input type="checkbox" name="module_{{ .Name }}"{{ if .Enabled }} checked{{ end }}>
-            <span class="toggle-slider"></span>
-          </label>
+          {{ end }}
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save changes</button>
+          <a href="/dashboard" class="btn btn-ghost">Cancel</a>
         </div>
         {{ end }}
-      </div>
+      </form>
+    </div>
 
-      <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Save changes</button>
-        <a href="/dashboard" class="btn btn-ghost">Cancel</a>
+    <!-- ── Danger Zone tab ──────────────────────────────────────────────── -->
+    <div id="tab-danger" class="tab-panel" role="tabpanel" hidden>
+      <div class="danger-zone">
+        <div class="danger-zone-header">Danger Zone</div>
+        <div class="danger-action">
+          <div>
+            <strong>Remove Prishe from this server</strong>
+            <p>She will leave immediately and all module settings for this server will be lost.</p>
+          </div>
+          <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/leave"
+                onsubmit="return confirm('Remove Prishe from {{ .Guild.Name }}? This cannot be undone.')">
+            <button type="submit" class="btn btn-danger">Leave Server</button>
+          </form>
+        </div>
       </div>
-      {{ end }}
-    </form>
+    </div>
+
+    {{ end }}
   </div>
+
+  <script>
+    (function () {
+      var tabs    = document.querySelectorAll('.tab');
+      var panels  = document.querySelectorAll('.tab-panel');
+
+      function activate(name) {
+        tabs.forEach(function (t) {
+          t.classList.toggle('active', t.dataset.tab === name);
+          t.setAttribute('aria-selected', t.dataset.tab === name);
+        });
+        panels.forEach(function (p) {
+          p.hidden = p.id !== 'tab-' + name;
+        });
+      }
+
+      tabs.forEach(function (tab) {
+        tab.addEventListener('click', function () { activate(tab.dataset.tab); });
+      });
+
+      // Honour #danger URL fragment (e.g. after a failed leave attempt redirect).
+      if (window.location.hash === '#danger') { activate('danger'); }
+    }());
+  </script>
 
 </body>
 </html>
