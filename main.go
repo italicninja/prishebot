@@ -29,6 +29,20 @@ func main() {
 		log.Fatalf("failed to create bot: %v", err)
 	}
 
+	// ── Web server ───────────────────────────────────────────────────────────
+	// Start the HTTP server first so Railway's healthcheck passes immediately
+	// while module loading (which makes several Discord API calls) is still
+	// in progress. The /health endpoint responds 200 with no dependencies.
+	srv := web.NewServer(cfg, b)
+	srvErr := make(chan error, 1)
+	go func() {
+		if err := srv.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			srvErr <- err
+		}
+	}()
+	log.Printf("Web UI listening on :%s", cfg.Port)
+
+	// ── Bot modules ──────────────────────────────────────────────────────────
 	// Register built-in modules. To add your own, implement the bot.Module
 	// interface and call b.LoadModule(yourmodule.New()) here.
 	if err := b.LoadModule(ping.New()); err != nil {
@@ -51,15 +65,6 @@ func main() {
 		log.Fatalf("failed to start bot: %v", err)
 	}
 	defer b.Stop()
-
-	// ── Web server ───────────────────────────────────────────────────────────
-	srv := web.NewServer(cfg, b)
-	srvErr := make(chan error, 1)
-	go func() {
-		if err := srv.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			srvErr <- err
-		}
-	}()
 
 	log.Printf("Bot and web UI running. Visit http://localhost:%s", cfg.Port)
 

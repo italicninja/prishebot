@@ -2,7 +2,7 @@
 dockerfile = "Dockerfile"
 
 [deploy]
-healthcheckPath = "/"
-healthcheckTimeout = 10
+healthcheckPath = "/health"
+healthcheckTimeout = 30
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3

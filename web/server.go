@@ -76,6 +76,11 @@ func (s *Server) routes() *gin.Engine {
 		r.Static("/icons", s.cfg.IconsDir)
 	}
 
+	// ── Health ──────────────────────────────────────────────────────────────
+	// Railway (and any load balancer) polls this path. It must respond 200
+	// immediately — do not gate it behind module load or Discord connectivity.
+	r.GET("/health", func(c *gin.Context) { c.Status(http.StatusOK) })
+
 	// ── Public ──────────────────────────────────────────────────────────────
 	r.GET("/", s.handleHome)
 	r.GET("/login", s.handleLogin)
