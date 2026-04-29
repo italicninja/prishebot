@@ -173,9 +173,10 @@ type Module struct {
 	mu       sync.Mutex
 	raids    map[string]*Raid
 
-	// roleEmoji is populated synchronously in OnLoad then never modified again,
-	// so it is safe to read from interaction handlers without holding mu.
-	roleEmoji map[string]*discordgo.ComponentEmoji // role -> app emoji
+	// roleEmoji and jobEmoji are populated synchronously in OnLoad then never
+	// modified again, so they are safe to read from interaction handlers without mu.
+	roleEmoji map[string]*discordgo.ComponentEmoji // role key -> app emoji
+	jobEmoji  map[string]*discordgo.ComponentEmoji // job key -> app emoji
 }
 
 func New(dataFile, appID string) *Module {
@@ -267,7 +268,7 @@ func (m *Module) HandleInteraction(s *discordgo.Session, i *discordgo.Interactio
 
 func (m *Module) OnLoad(s *discordgo.Session) error {
 	m.load()
-	m.ensureRoleEmojis(s)
+	m.ensureEmojis(s)
 	log.Println("[raid] module loaded")
 	return nil
 }
@@ -277,15 +278,14 @@ func (m *Module) OnUnload(_ *discordgo.Session) error {
 	return nil
 }
 
-// ensureRoleEmojis uploads the five FF14 role icons as Discord application
-// emojis if they are not already present, then stores them in m.roleEmoji.
-// It is safe to call multiple times (idempotent).
-func (m *Module) ensureRoleEmojis(s *discordgo.Session) {
-	appID := m.appID
-
-	existing, err := s.ApplicationEmojis(appID)
+// ensureEmojis uploads FF14 role and job icons as Discord application emojis
+// if they are not already present. Idempotent: existing emojis are reused.
+// Missing uploads (e.g. 404 on newer jobs) are skipped silently; the embed
+// falls back to text for any job whose icon could not be uploaded.
+func (m *Module) ensureEmojis(s *discordgo.Session) {
+	existing, err := s.ApplicationEmojis(m.appID)
 	if err != nil {
-		log.Printf("[raid] could not list application emojis: %v — role icons will fall back to Unicode", err)
+		log.Printf("[raid] could not list application emojis: %v — icons will fall back to text/Unicode", err)
 		return
 	}
 
@@ -294,33 +294,46 @@ func (m *Module) ensureRoleEmojis(s *discordgo.Session) {
 		byName[e.Name] = e
 	}
 
-	emojis := make(map[string]*discordgo.ComponentEmoji, len(stdComp))
-	for _, def := range stdComp {
-		if e, ok := byName[def.emojiName]; ok {
-			emojis[def.role] = &discordgo.ComponentEmoji{ID: e.ID, Name: e.Name}
-			log.Printf("[raid] reusing application emoji %s (ID: %s)", def.emojiName, e.ID)
-			continue
+	upload := func(name, iconURL string) *discordgo.ComponentEmoji {
+		if e, ok := byName[name]; ok {
+			log.Printf("[raid] reusing emoji %s (%s)", name, e.ID)
+			return &discordgo.ComponentEmoji{ID: e.ID, Name: e.Name}
 		}
-
-		imgData, err := fetchImage(def.iconURL)
+		img, err := fetchImage(iconURL)
 		if err != nil {
-			log.Printf("[raid] could not download icon for %s: %v", def.role, err)
-			continue
+			log.Printf("[raid] skip emoji %s: %v", name, err)
+			return nil
 		}
-		b64 := base64.StdEncoding.EncodeToString(imgData)
-		created, err := s.ApplicationEmojiCreate(appID, &discordgo.EmojiParams{
-			Name:  def.emojiName,
+		b64 := base64.StdEncoding.EncodeToString(img)
+		created, err := s.ApplicationEmojiCreate(m.appID, &discordgo.EmojiParams{
+			Name:  name,
 			Image: "data:image/png;base64," + b64,
 		})
 		if err != nil {
-			log.Printf("[raid] could not create application emoji %s: %v", def.emojiName, err)
-			continue
+			log.Printf("[raid] could not create emoji %s: %v", name, err)
+			return nil
 		}
-		emojis[def.role] = &discordgo.ComponentEmoji{ID: created.ID, Name: created.Name}
-		log.Printf("[raid] created application emoji %s (ID: %s)", def.emojiName, created.ID)
+		log.Printf("[raid] created emoji %s (%s)", name, created.ID)
+		return &discordgo.ComponentEmoji{ID: created.ID, Name: created.Name}
 	}
 
-	m.roleEmoji = emojis
+	// Role icons
+	roleEmoji := make(map[string]*discordgo.ComponentEmoji, len(stdComp))
+	for _, def := range stdComp {
+		if e := upload(def.emojiName, def.iconURL); e != nil {
+			roleEmoji[def.role] = e
+		}
+	}
+	m.roleEmoji = roleEmoji
+
+	// Job icons — emoji name is "prs_<key>" (e.g. "prs_darkknight")
+	jobEmoji := make(map[string]*discordgo.ComponentEmoji, len(allJobs))
+	for _, j := range allJobs {
+		if e := upload("prs_"+j.key, j.iconURL); e != nil {
+			jobEmoji[j.key] = e
+		}
+	}
+	m.jobEmoji = jobEmoji
 }
 
 // ── Slash command handlers ────────────────────────────────────────────────────
@@ -530,7 +543,7 @@ func (m *Module) handleJoin(s *discordgo.Session, i *discordgo.InteractionCreate
 		return
 	}
 
-	showJobSelect(s, i, fmt.Sprintf("raid:select:%s:%s", raidID, role),
+	m.showJobSelect(s, i, fmt.Sprintf("raid:select:%s:%s", raidID, role),
 		fmt.Sprintf("Choose your **%s** job:", roleName(role)),
 		jobsByRole[role])
 }
@@ -677,7 +690,7 @@ func (m *Module) handleBench(s *discordgo.Session, i *discordgo.InteractionCreat
 		return
 	}
 	m.mu.Unlock()
-	showJobSelect(s, i, "raid:selectbench:"+raidID, "Choose your job for **Bench**:", allJobs)
+	m.showJobSelect(s, i, "raid:selectbench:"+raidID, "Choose your job for **Bench**:", allJobs)
 }
 
 func (m *Module) handleBenchSelect(s *discordgo.Session, i *discordgo.InteractionCreate, raidID string) {
@@ -792,7 +805,7 @@ func (m *Module) handleTentative(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 	m.mu.Unlock()
-	showJobSelect(s, i, "raid:selecttent:"+raidID, "Choose your job for **Tentative**:", allJobs)
+	m.showJobSelect(s, i, "raid:selecttent:"+raidID, "Choose your job for **Tentative**:", allJobs)
 }
 
 func (m *Module) handleTentSelect(s *discordgo.Session, i *discordgo.InteractionCreate, raidID string) {
@@ -922,7 +935,11 @@ func (m *Module) buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 			if sl.Signee != nil {
 				line := fmt.Sprintf("`%d` <@%s>", sl.Signee.Number, sl.Signee.UserID)
 				if sl.Signee.Job != "" {
-					line += " — " + resolveJobName(sl.Signee.Job)
+					if e := m.jobEmoji[sl.Signee.Job]; e != nil {
+						line += fmt.Sprintf(" <:%s:%s>", e.Name, e.ID)
+					} else {
+						line += " — " + resolveJobName(sl.Signee.Job)
+					}
 				}
 				if sl.Signee.Late {
 					line += " *(late)*"
@@ -953,7 +970,11 @@ func (m *Module) buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 			}
 			line := fmt.Sprintf("`%d` <@%s>", se.Number, se.UserID)
 			if se.Job != "" {
-				line += " — " + resolveJobName(se.Job)
+				if e := m.jobEmoji[se.Job]; e != nil {
+					line += fmt.Sprintf(" <:%s:%s>", e.Name, e.ID)
+				} else {
+					line += " — " + resolveJobName(se.Job)
+				}
 			}
 			lines = append(lines, line)
 		}
@@ -1101,10 +1122,14 @@ func displayName(u *discordgo.User) string {
 	return u.Username
 }
 
-func showJobSelect(s *discordgo.Session, i *discordgo.InteractionCreate, customID, prompt string, jobs []jobDef) {
+func (m *Module) showJobSelect(s *discordgo.Session, i *discordgo.InteractionCreate, customID, prompt string, jobs []jobDef) {
 	options := make([]discordgo.SelectMenuOption, 0, len(jobs))
 	for _, j := range jobs {
-		options = append(options, discordgo.SelectMenuOption{Label: j.name, Value: j.key})
+		opt := discordgo.SelectMenuOption{Label: j.name, Value: j.key}
+		if e := m.jobEmoji[j.key]; e != nil {
+			opt.Emoji = e
+		}
+		options = append(options, opt)
 	}
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
