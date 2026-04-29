@@ -57,7 +57,7 @@ func main() {
 	if err := b.LoadModule(roles.New(cfg.RolesDataFile)); err != nil {
 		log.Fatalf("failed to load roles module: %v", err)
 	}
-	if err := b.LoadModule(raid.New(cfg.RaidDataFile)); err != nil {
+	if err := b.LoadModule(raid.New(cfg.RaidDataFile, cfg.ClientID)); err != nil {
 		log.Fatalf("failed to load raid module: %v", err)
 	}
 

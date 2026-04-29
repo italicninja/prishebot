@@ -169,6 +169,7 @@ func newSlots() []Slot {
 
 type Module struct {
 	dataFile string
+	appID    string // Discord application ID (= ClientID), used for application emoji API
 	mu       sync.Mutex
 	raids    map[string]*Raid
 
@@ -177,8 +178,8 @@ type Module struct {
 	roleEmoji map[string]*discordgo.ComponentEmoji // role -> app emoji
 }
 
-func New(dataFile string) *Module {
-	return &Module{dataFile: dataFile, raids: make(map[string]*Raid)}
+func New(dataFile, appID string) *Module {
+	return &Module{dataFile: dataFile, appID: appID, raids: make(map[string]*Raid)}
 }
 
 func (m *Module) Name() string        { return "raid" }
@@ -280,7 +281,7 @@ func (m *Module) OnUnload(_ *discordgo.Session) error {
 // emojis if they are not already present, then stores them in m.roleEmoji.
 // It is safe to call multiple times (idempotent).
 func (m *Module) ensureRoleEmojis(s *discordgo.Session) {
-	appID := s.State.User.ID
+	appID := m.appID
 
 	existing, err := s.ApplicationEmojis(appID)
 	if err != nil {
