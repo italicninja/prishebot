@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prishe — Raids · {{ .Guild.Name }}</title>
+  {{ template "theme-init" . }}
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{{ template "auth-nav" . }}
+
+<div class="page">
+  <div class="crumb">
+    <a href="/dashboard" class="btn btn-ghost btn-sm">← Servers</a>
+    <a href="/dashboard/server/{{ .Guild.ID }}" class="btn btn-ghost btn-sm">{{ .Guild.Name }}</a>
+  </div>
+
+  <div class="guild-header">
+    {{ if .Guild.IconURL }}
+      <img class="guild-icon" src="{{ .Guild.IconURL }}" alt="{{ .Guild.Name }}">
+    {{ else }}
+      <div class="guild-icon-ph">{{ slice .Guild.Name 0 1 }}</div>
+    {{ end }}
+    <div>
+      <div class="guild-name">Raid Calendar</div>
+      <div class="guild-sub">All raids for {{ .Guild.Name }}, newest first</div>
+    </div>
+  </div>
+
+  {{ if not .Raids }}
+  <div class="empty">
+    <div class="empty-icon">⚔️</div>
+    <h2>No raids yet</h2>
+    <p>Use <code>/raid create</code> in Discord to post a sign-up.</p>
+  </div>
+  {{ else }}
+  <div class="raid-list">
+    {{ range .Raids }}
+    <div class="raid-card">
+
+      <div class="raid-card-head">
+        <span class="raid-title">{{ .Title }}</span>
+        {{ if .DateStr }}<span class="raid-date">{{ .DateStr }}</span>{{ end }}
+        {{ if .Closed }}
+          <span class="badge badge-closed">Closed</span>
+        {{ else }}
+          <span class="badge badge-green">Open</span>
+        {{ end }}
+        <span style="margin-left:auto;font-size:0.72rem;color:var(--muted);font-family:ui-monospace,monospace;">{{ .ID }}</span>
+      </div>
+
+      <div class="raid-roster">
+
+        <!-- Accepted -->
+        <div class="roster-col">
+          <div class="roster-col-head">
+            Accepted
+            {{ if .Accepted }}<span style="color:var(--text);">({{ len .Accepted }})</span>{{ end }}
+          </div>
+          {{ if not .Accepted }}
+            <div class="roster-empty">None signed up</div>
+          {{ else }}
+            {{ range .Accepted }}
+            <div class="roster-member">
+              <span class="roster-num">{{ .Number }}</span>
+              {{ if .JobIconURL }}
+                <img class="roster-job" src="{{ .JobIconURL }}" alt="{{ .JobName }}" title="{{ .JobName }}">
+              {{ end }}
+              <span class="roster-name" title="{{ .DisplayName }}">{{ .DisplayName }}</span>
+              {{ if .Late }}<span class="roster-tag">Late</span>{{ end }}
+            </div>
+            {{ end }}
+          {{ end }}
+        </div>
+
+        <!-- Maybe (bench + tentative) -->
+        <div class="roster-col">
+          <div class="roster-col-head">
+            Maybe
+            {{ if .Maybe }}<span style="color:var(--text);">({{ len .Maybe }})</span>{{ end }}
+          </div>
+          {{ if not .Maybe }}
+            <div class="roster-empty">—</div>
+          {{ else }}
+            {{ range .Maybe }}
+            <div class="roster-member">
+              <span class="roster-num">{{ .Number }}</span>
+              {{ if .JobIconURL }}
+                <img class="roster-job" src="{{ .JobIconURL }}" alt="{{ .JobName }}" title="{{ .JobName }}">
+              {{ end }}
+              <span class="roster-name" title="{{ .DisplayName }}">{{ .DisplayName }}</span>
+              <span class="roster-tag">{{ .Status }}</span>
+            </div>
+            {{ end }}
+          {{ end }}
+        </div>
+
+        <!-- Declined (absence) -->
+        <div class="roster-col">
+          <div class="roster-col-head">
+            Declined
+            {{ if .Declined }}<span style="color:var(--text);">({{ len .Declined }})</span>{{ end }}
+          </div>
+          {{ if not .Declined }}
+            <div class="roster-empty">—</div>
+          {{ else }}
+            {{ range .Declined }}
+            <div class="roster-member">
+              <span class="roster-num">{{ .Number }}</span>
+              {{ if .JobIconURL }}
+                <img class="roster-job" src="{{ .JobIconURL }}" alt="{{ .JobName }}" title="{{ .JobName }}">
+              {{ end }}
+              <span class="roster-name" title="{{ .DisplayName }}">{{ .DisplayName }}</span>
+            </div>
+            {{ end }}
+          {{ end }}
+        </div>
+
+      </div><!-- .raid-roster -->
+
+      {{ if not .Closed }}
+      <div class="raid-card-foot">
+        <form method="POST" action="/dashboard/server/{{ $.Guild.ID }}/raids/{{ .ID }}/close"
+              onsubmit="return confirm('Close sign-ups for {{ .Title }}?')">
+          <button type="submit" class="btn btn-ghost btn-sm">Close sign-ups</button>
+        </form>
+      </div>
+      {{ end }}
+
+    </div><!-- .raid-card -->
+    {{ end }}
+  </div><!-- .raid-list -->
+  {{ end }}
+</div>
+
+{{ template "theme-js" . }}
+</body>
+</html>

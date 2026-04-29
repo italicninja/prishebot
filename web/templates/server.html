@@ -1,145 +1,126 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Prishe — {{ .Guild.Name }}</title>
+  {{ template "theme-init" . }}
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+{{ template "auth-nav" . }}
 
-  <nav class="navbar">
-    <div class="navbar-brand">
-      <span class="brand-icon">✦</span> Prishe
-    </div>
-    <div class="navbar-user">
-      <img class="avatar" src="{{ .User.AvatarURL }}" alt="{{ .User.Username }}">
-      <span>{{ .User.Username }}</span>
-      <a href="/logout" class="btn btn-ghost" style="padding:0.3rem 0.75rem;">Logout</a>
-    </div>
-  </nav>
-
-  <div class="container">
-    <div style="margin-bottom:1.5rem;">
-      <a href="/dashboard" class="btn btn-ghost">← Back to servers</a>
-    </div>
-
-    <div class="server-header">
-      {{ if .Guild.IconURL }}
-        <img class="server-header-icon" src="{{ .Guild.IconURL }}" alt="{{ .Guild.Name }}">
-      {{ else }}
-        <div class="server-header-icon-placeholder">{{ slice .Guild.Name 0 1 }}</div>
-      {{ end }}
-      <div class="server-header-info">
-        <h1>{{ .Guild.Name }}</h1>
-        <p>Control which Prishe modules are active on this server</p>
-      </div>
-    </div>
-
-    {{ if not .Guild.BotPresent }}
-    <div class="invite-banner">
-      <p><strong>Prishe isn't in this server yet.</strong> Add her first to use these settings.</p>
-      <a href="https://discord.com/api/oauth2/authorize?client_id={{ .ClientID }}&permissions=268454912&scope=bot%20applications.commands&guild_id={{ .Guild.ID }}"
-         target="_blank" class="btn btn-primary">
-        Add Prishe to Server
-      </a>
-    </div>
-    {{ else }}
-
-    <div class="tabs" role="tablist">
-      <button class="tab active" role="tab" aria-selected="true"  data-tab="settings">⚙️ Settings</button>
-      <button class="tab tab-danger"  role="tab" aria-selected="false" data-tab="danger">⚠️ Danger Zone</button>
-    </div>
-
-    <!-- ── Settings tab ─────────────────────────────────────────────────── -->
-    <div id="tab-settings" class="tab-panel" role="tabpanel">
-
-      <div style="margin-bottom:1.5rem;display:flex;gap:0.75rem;flex-wrap:wrap;">
-        <a href="/dashboard/server/{{ .Guild.ID }}/roles" class="btn btn-ghost">🏷️ Self-assignable roles</a>
-        <a href="/dashboard/server/{{ .Guild.ID }}/birthday" class="btn btn-ghost">🎂 Birthday settings</a>
-      </div>
-
-      <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/modules">
-        <h2 style="margin-bottom:1rem;font-size:1.1rem;">Modules</h2>
-
-        {{ if not .Modules }}
-        <div class="empty">
-          <div class="empty-icon">📦</div>
-          <h2>No modules loaded</h2>
-          <p>Add modules in <code>main.go</code> to see them here.</p>
-        </div>
-        {{ else }}
-        <div class="modules-list">
-          {{ range .Modules }}
-          <div class="module-row">
-            <div class="module-info">
-              <h3>{{ .Name }}</h3>
-              <p>{{ .Description }}</p>
-              {{ if .Commands }}
-              <div class="module-commands">
-                {{ range .Commands }}<code>{{ . }}</code>{{ end }}
-              </div>
-              {{ end }}
-            </div>
-            <label class="toggle" title="Toggle {{ .Name }}">
-              <input type="checkbox" name="module_{{ .Name }}"{{ if .Enabled }} checked{{ end }}>
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          {{ end }}
-        </div>
-
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary">Save changes</button>
-          <a href="/dashboard" class="btn btn-ghost">Cancel</a>
-        </div>
-        {{ end }}
-      </form>
-    </div>
-
-    <!-- ── Danger Zone tab ──────────────────────────────────────────────── -->
-    <div id="tab-danger" class="tab-panel" role="tabpanel" hidden>
-      <div class="danger-zone">
-        <div class="danger-zone-header">Danger Zone</div>
-        <div class="danger-action">
-          <div>
-            <strong>Remove Prishe from this server</strong>
-            <p>She will leave immediately and all module settings for this server will be lost.</p>
-          </div>
-          <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/leave"
-                onsubmit="return confirm('Remove Prishe from {{ .Guild.Name }}? This cannot be undone.')">
-            <button type="submit" class="btn btn-danger">Leave Server</button>
-          </form>
-        </div>
-      </div>
-    </div>
-
-    {{ end }}
+<div class="page">
+  <div class="crumb">
+    <a href="/dashboard" class="btn btn-ghost btn-sm">← Servers</a>
   </div>
 
-  <script>
-    (function () {
-      var tabs    = document.querySelectorAll('.tab');
-      var panels  = document.querySelectorAll('.tab-panel');
+  <div class="guild-header">
+    {{ if .Guild.IconURL }}
+      <img class="guild-icon" src="{{ .Guild.IconURL }}" alt="{{ .Guild.Name }}">
+    {{ else }}
+      <div class="guild-icon-ph">{{ slice .Guild.Name 0 1 }}</div>
+    {{ end }}
+    <div>
+      <div class="guild-name">{{ .Guild.Name }}</div>
+      <div class="guild-sub">Manage modules and settings</div>
+    </div>
+  </div>
 
-      function activate(name) {
-        tabs.forEach(function (t) {
-          t.classList.toggle('active', t.dataset.tab === name);
-          t.setAttribute('aria-selected', t.dataset.tab === name);
-        });
-        panels.forEach(function (p) {
-          p.hidden = p.id !== 'tab-' + name;
-        });
-      }
+  {{ if not .Guild.BotPresent }}
+  <div class="banner banner-info" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+    <span><strong style="color:var(--text);">Prishe isn't in this server yet.</strong> Add her first to use these settings.</span>
+    <a href="https://discord.com/api/oauth2/authorize?client_id={{ .ClientID }}&permissions=268454912&scope=bot%20applications.commands&guild_id={{ .Guild.ID }}"
+       target="_blank" class="btn btn-primary btn-sm">Add Prishe</a>
+  </div>
+  {{ else }}
 
-      tabs.forEach(function (tab) {
-        tab.addEventListener('click', function () { activate(tab.dataset.tab); });
-      });
+  <div style="display:flex;gap:0.6rem;flex-wrap:wrap;margin-bottom:1.75rem;">
+    <a href="/dashboard/server/{{ .Guild.ID }}/roles"   class="btn btn-ghost btn-sm">Self-assignable roles</a>
+    <a href="/dashboard/server/{{ .Guild.ID }}/birthday" class="btn btn-ghost btn-sm">Birthday settings</a>
+    <a href="/dashboard/server/{{ .Guild.ID }}/raids"   class="btn btn-ghost btn-sm">Raid calendar</a>
+  </div>
 
-      // Honour #danger URL fragment (e.g. after a failed leave attempt redirect).
-      if (window.location.hash === '#danger') { activate('danger'); }
-    }());
-  </script>
+  <div class="tabs" role="tablist">
+    <button class="tab active" role="tab" aria-selected="true"  data-tab="settings">Settings</button>
+    <button class="tab tab-danger"  role="tab" aria-selected="false" data-tab="danger">Danger Zone</button>
+  </div>
 
+  <!-- Settings tab -->
+  <div id="tab-settings" class="tab-panel" role="tabpanel">
+    <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/modules">
+      <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.75rem;">Modules</div>
+
+      {{ if not .Modules }}
+      <div class="empty" style="padding:2.5rem 1rem;">
+        <div class="empty-icon">📦</div>
+        <h2>No modules loaded</h2>
+        <p>Add modules in <code>main.go</code> to see them here.</p>
+      </div>
+      {{ else }}
+      <div class="module-list">
+        {{ range .Modules }}
+        <div class="module-row">
+          <div class="module-info">
+            <h3>{{ .Name }}</h3>
+            <p>{{ .Description }}</p>
+            {{ if .Commands }}
+            <div class="module-cmds">
+              {{ range .Commands }}<code>{{ . }}</code>{{ end }}
+            </div>
+            {{ end }}
+          </div>
+          <label class="toggle" title="Toggle {{ .Name }}">
+            <input type="checkbox" name="module_{{ .Name }}"{{ if .Enabled }} checked{{ end }}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        {{ end }}
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save changes</button>
+        <a href="/dashboard" class="btn btn-ghost">Cancel</a>
+      </div>
+      {{ end }}
+    </form>
+  </div>
+
+  <!-- Danger Zone tab -->
+  <div id="tab-danger" class="tab-panel" role="tabpanel" hidden>
+    <div class="danger-zone">
+      <div class="danger-zone-head">Danger Zone</div>
+      <div class="danger-action">
+        <div>
+          <strong>Remove Prishe from this server</strong>
+          <p>She will leave immediately and all module settings for this server will be lost.</p>
+        </div>
+        <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/leave"
+              onsubmit="return confirm('Remove Prishe from {{ .Guild.Name }}? This cannot be undone.')">
+          <button type="submit" class="btn btn-danger btn-sm">Leave Server</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  {{ end }}
+</div>
+
+<script>
+(function(){
+  var tabs   = document.querySelectorAll('.tab');
+  var panels = document.querySelectorAll('.tab-panel');
+  function activate(name){
+    tabs.forEach(function(t){
+      t.classList.toggle('active', t.dataset.tab===name);
+      t.setAttribute('aria-selected', t.dataset.tab===name);
+    });
+    panels.forEach(function(p){ p.hidden = p.id !== 'tab-'+name; });
+  }
+  tabs.forEach(function(t){ t.addEventListener('click', function(){ activate(t.dataset.tab); }); });
+  if(window.location.hash==='#danger') activate('danger');
+}());
+</script>
+{{ template "theme-js" . }}
 </body>
 </html>

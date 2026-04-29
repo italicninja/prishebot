@@ -15,8 +15,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -1281,4 +1283,102 @@ func newID() string {
 		return "00000000"
 	}
 	return fmt.Sprintf("%08x", b)
+}
+
+// ── Web calendar API ──────────────────────────────────────────────────────────
+
+// RaidMember is a read-only view of one participant for the web UI.
+type RaidMember struct {
+	Number      int
+	DisplayName string
+	Job         string // job key, e.g. "darkknight"
+	JobName     string // human-readable, e.g. "Dark Knight"
+	JobIconURL  string // xivapi.com PNG URL
+	Late        bool
+	Status      string // "" | "bench" | "tentative" | "absence"
+}
+
+// RaidView is a read-only snapshot of a raid for the web UI.
+type RaidView struct {
+	ID       string
+	Title    string
+	UnixTime int64
+	DateStr  string // pre-formatted date, e.g. "Apr 30, 2026 · 20:00 UTC"
+	Closed   bool
+	Accepted []RaidMember // main roster (filled slots)
+	Maybe    []RaidMember // bench + tentative
+	Declined []RaidMember // absence
+}
+
+// GuildRaids returns snapshots of all raids for a guild, newest first.
+func (m *Module) GuildRaids(guildID string) []RaidView {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var views []RaidView
+	for _, r := range m.raids {
+		if r.GuildID == guildID {
+			views = append(views, buildRaidView(r))
+		}
+	}
+	sort.Slice(views, func(i, j int) bool {
+		if views[i].UnixTime != views[j].UnixTime {
+			return views[i].UnixTime > views[j].UnixTime
+		}
+		return views[i].ID > views[j].ID
+	})
+	return views
+}
+
+// CloseRaid closes sign-ups for a raid by ID. Returns false if not found or already closed.
+func (m *Module) CloseRaid(guildID, raidID string) bool {
+	m.mu.Lock()
+	r, ok := m.raids[raidID]
+	if !ok || r.GuildID != guildID || r.Closed {
+		m.mu.Unlock()
+		return false
+	}
+	r.Closed = true
+	m.mu.Unlock()
+	m.save()
+	return true
+}
+
+func buildRaidView(r *Raid) RaidView {
+	v := RaidView{ID: r.ID, Title: r.Title, UnixTime: r.UnixTime, Closed: r.Closed}
+	if r.UnixTime != 0 {
+		v.DateStr = time.Unix(r.UnixTime, 0).UTC().Format("Jan 2, 2006 · 15:04 UTC")
+	}
+	for _, sl := range r.Slots {
+		if sl.Signee == nil {
+			continue
+		}
+		v.Accepted = append(v.Accepted, buildMemberView(sl.Signee.DisplayName, sl.Signee.Job, sl.Signee.Number, sl.Signee.Late, ""))
+	}
+	for _, se := range r.StatusEntries {
+		mem := buildMemberView(se.DisplayName, se.Job, se.Number, false, se.Type)
+		switch se.Type {
+		case "bench", "tentative":
+			v.Maybe = append(v.Maybe, mem)
+		case "absence":
+			v.Declined = append(v.Declined, mem)
+		}
+	}
+	sort.Slice(v.Accepted, func(i, j int) bool { return v.Accepted[i].Number < v.Accepted[j].Number })
+	sort.Slice(v.Maybe, func(i, j int) bool { return v.Maybe[i].Number < v.Maybe[j].Number })
+	sort.Slice(v.Declined, func(i, j int) bool { return v.Declined[i].Number < v.Declined[j].Number })
+	return v
+}
+
+func buildMemberView(displayName, jobKey string, number int, late bool, status string) RaidMember {
+	mem := RaidMember{Number: number, DisplayName: displayName, Job: jobKey, Late: late, Status: status}
+	if jobKey != "" {
+		mem.JobName = resolveJobName(jobKey)
+		for _, j := range allJobs {
+			if j.key == jobKey {
+				mem.JobIconURL = j.iconURL
+				break
+			}
+		}
+	}
+	return mem
 }

@@ -1,56 +1,48 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Prishe — Dashboard</title>
+  {{ template "theme-init" . }}
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+{{ template "auth-nav" . }}
 
-  <nav class="navbar">
-    <div class="navbar-brand">
-      <span class="brand-icon">✦</span> Prishe
-    </div>
-    <div class="navbar-user">
-      <img class="avatar" src="{{ .User.AvatarURL }}" alt="{{ .User.Username }}">
-      <span>{{ .User.Username }}</span>
-      <a href="/logout" class="btn btn-ghost" style="padding:0.3rem 0.75rem;">Logout</a>
-    </div>
-  </nav>
-
-  <div class="container wide">
-    <div class="page-header">
-      <h1>Your Servers</h1>
-      <p>Select a server to manage Prishe's modules. Only servers where you have Administrator permission are shown.</p>
-    </div>
-
-    {{ if not .Guilds }}
-    <div class="empty">
-      <div class="empty-icon">🏝️</div>
-      <h2>No servers found</h2>
-      <p>You don't appear to be an administrator in any Discord servers.</p>
-    </div>
-    {{ else }}
-    <div class="server-grid">
-      {{ range .Guilds }}
-      <a href="/dashboard/server/{{ .ID }}" class="server-card" style="text-decoration:none;color:inherit;">
-        {{ if .IconURL }}
-          <img class="server-icon" src="{{ .IconURL }}" alt="{{ .Name }}">
-        {{ else }}
-          <div class="server-icon-placeholder">{{ slice .Name 0 1 }}</div>
-        {{ end }}
-        <span class="server-name">{{ .Name }}</span>
-        {{ if .BotPresent }}
-          <span class="badge badge-green">✓ Prishe active</span>
-        {{ else }}
-          <span class="badge badge-muted">Not added yet</span>
-        {{ end }}
-      </a>
-      {{ end }}
-    </div>
-    {{ end }}
+<div class="page page-wide">
+  <div style="margin-bottom:1.5rem;">
+    <div class="page-title">Your Servers</div>
+    <div class="page-sub">Select a server to manage Prishe. Only servers where you have Administrator permission are shown.</div>
   </div>
 
+  {{ if not .Guilds }}
+  <div class="empty">
+    <div class="empty-icon">🏝️</div>
+    <h2>No servers found</h2>
+    <p>You don't appear to be an administrator in any Discord servers.</p>
+  </div>
+  {{ else }}
+  <div class="server-grid">
+    {{ range .Guilds }}
+    <a href="/dashboard/server/{{ .ID }}" class="server-card">
+      {{ if .IconURL }}
+        <img class="server-icon" src="{{ .IconURL }}" alt="{{ .Name }}">
+      {{ else }}
+        <div class="server-icon-ph">{{ slice .Name 0 1 }}</div>
+      {{ end }}
+      <span class="server-name">{{ .Name }}</span>
+      {{ if .BotPresent }}
+        <span class="badge badge-green">Active</span>
+      {{ else }}
+        <span class="badge badge-muted">Not added</span>
+      {{ end }}
+    </a>
+    {{ end }}
+  </div>
+  {{ end }}
+</div>
+
+{{ template "theme-js" . }}
 </body>
 </html>

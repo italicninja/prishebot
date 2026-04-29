@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/user/discord-bot-skeleton/bot/modules/birthday"
+	"github.com/user/discord-bot-skeleton/bot/modules/raid"
 	"github.com/user/discord-bot-skeleton/bot/modules/roles"
 )
 
@@ -500,6 +501,56 @@ func (s *Server) handleUpdateBirthdaySettings(c *gin.Context) {
 	}
 
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?saved=1")
+}
+
+// handleRaidsPage renders the raid calendar page for a guild.
+func (s *Server) handleRaidsPage(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	src := findGuild(sess.Guilds, guildID)
+	if src == nil {
+		c.String(http.StatusForbidden, "You don't have admin access to that server.")
+		return
+	}
+	guild := *src
+	guild.BotPresent = s.botGuildSet()[guildID]
+
+	var raids []raid.RaidView
+	if mod, ok := s.bot.Modules()["raid"]; ok {
+		if rm, ok := mod.(*raid.Module); ok {
+			raids = rm.GuildRaids(guildID)
+		}
+	}
+
+	if err := s.tmpl.ExecuteTemplate(c.Writer, "raids.html", gin.H{
+		"User":  sess,
+		"Guild": &guild,
+		"Raids": raids,
+	}); err != nil {
+		log.Printf("[web] raids template error: %v", err)
+		c.Status(http.StatusInternalServerError)
+	}
+}
+
+// handleCloseRaidWeb closes a raid via the web dashboard and redirects back.
+func (s *Server) handleCloseRaidWeb(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	if findGuild(sess.Guilds, guildID) == nil {
+		c.String(http.StatusForbidden, "Access denied.")
+		return
+	}
+
+	raidID := c.Param("raidID")
+	if mod, ok := s.bot.Modules()["raid"]; ok {
+		if rm, ok := mod.(*raid.Module); ok {
+			rm.CloseRaid(guildID, raidID)
+		}
+	}
+
+	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids")
 }
 
 func roleColorHex(c int) string {

@@ -1,71 +1,61 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Prishe — Birthday Settings · {{ .Guild.Name }}</title>
+  <title>Prishe — Birthday · {{ .Guild.Name }}</title>
+  {{ template "theme-init" . }}
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+{{ template "auth-nav" . }}
 
-  <nav class="navbar">
-    <div class="navbar-brand">
-      <span class="brand-icon">✦</span> Prishe
-    </div>
-    <div class="navbar-user">
-      <img class="avatar" src="{{ .User.AvatarURL }}" alt="{{ .User.Username }}">
-      <span>{{ .User.Username }}</span>
-      <a href="/logout" class="btn btn-ghost" style="padding:0.3rem 0.75rem;">Logout</a>
-    </div>
-  </nav>
+<div class="page">
+  <div class="crumb">
+    <a href="/dashboard" class="btn btn-ghost btn-sm">← Servers</a>
+    <a href="/dashboard/server/{{ .Guild.ID }}" class="btn btn-ghost btn-sm">{{ .Guild.Name }}</a>
+  </div>
 
-  <div class="container">
-    <div style="margin-bottom:1.5rem;display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
-      <a href="/dashboard" class="btn btn-ghost">← Back to servers</a>
-      <a href="/dashboard/server/{{ .Guild.ID }}" class="btn btn-ghost">⚙ Module settings</a>
-    </div>
-
-    <div class="server-header">
-      {{ if .Guild.IconURL }}
-        <img class="server-header-icon" src="{{ .Guild.IconURL }}" alt="{{ .Guild.Name }}">
-      {{ else }}
-        <div class="server-header-icon-placeholder">{{ slice .Guild.Name 0 1 }}</div>
-      {{ end }}
-      <div class="server-header-info">
-        <h1>{{ .Guild.Name }}</h1>
-        <p>Birthday module settings</p>
-      </div>
-    </div>
-
-    {{ if .Saved }}
-    <div class="success-banner">✅ Settings saved!</div>
+  <div class="guild-header">
+    {{ if .Guild.IconURL }}
+      <img class="guild-icon" src="{{ .Guild.IconURL }}" alt="{{ .Guild.Name }}">
+    {{ else }}
+      <div class="guild-icon-ph">{{ slice .Guild.Name 0 1 }}</div>
     {{ end }}
-
-    <div class="card">
-      <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/birthday">
-
-        <div class="form-field">
-          <label for="gif_query">GIF search query</label>
-          <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.6rem;">
-            This is sent to Tenor when Prishe picks a birthday GIF.
-            Supports any search terms — try <code>anime birthday cake</code>,
-            <code>celebration confetti</code>, or even a character name.
-          </p>
-          <input type="text" name="gif_query" id="gif_query" class="form-input"
-                 value="{{ .CurrentQuery }}"
-                 placeholder="{{ .DefaultQuery }}" maxlength="100">
-          <p style="font-size:0.8rem;color:var(--text-muted);margin-top:0.4rem;">
-            Leave blank to restore the default: <code>{{ .DefaultQuery }}</code>
-          </p>
-        </div>
-
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary">Save</button>
-          <a href="/dashboard/server/{{ .Guild.ID }}" class="btn btn-ghost">Cancel</a>
-        </div>
-      </form>
+    <div>
+      <div class="guild-name">Birthday Settings</div>
+      <div class="guild-sub">Configure the GIF Prishe sends on birthdays</div>
     </div>
   </div>
 
+  {{ if .Saved }}
+  <div class="banner banner-success">Settings saved.</div>
+  {{ end }}
+
+  <div class="card">
+    <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/birthday">
+      <div class="form-field">
+        <label for="gif_query">GIF search query</label>
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:0.5rem;">
+          Sent to Tenor when Prishe picks a birthday GIF. Try <code>anime birthday cake</code>,
+          <code>celebration confetti</code>, or a character name.
+        </p>
+        <input type="text" name="gif_query" id="gif_query" class="form-input"
+               value="{{ .CurrentQuery }}"
+               placeholder="{{ .DefaultQuery }}" maxlength="100">
+        <p style="font-size:0.78rem;color:var(--muted);margin-top:0.4rem;">
+          Leave blank to restore the default: <code>{{ .DefaultQuery }}</code>
+        </p>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <a href="/dashboard/server/{{ .Guild.ID }}" class="btn btn-ghost">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+{{ template "theme-js" . }}
 </body>
 </html>
