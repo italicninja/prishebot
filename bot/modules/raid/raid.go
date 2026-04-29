@@ -1,15 +1,19 @@
 // Package raid provides FF14-style raid sign-ups backed by button interactions.
 // Standard 8-person composition: 2 Tank · 2 Healer · 2 Melee · 1 Ranged · 1 Caster.
-// Players click a role button → pick their specific job from a dropdown → get a
-// numbered spot in the roster. Bench / Late / Tentative / Absence are tracked
-// separately below the main roster in the embed.
+//
+// On startup, the module registers the five official FF14 role icons as Discord
+// application emojis (idempotent: reuses any already uploaded). Those emojis are
+// then used in role buttons and embed field headers instead of generic Unicode.
 package raid
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -20,20 +24,21 @@ import (
 // ── Composition definitions ───────────────────────────────────────────────────
 
 type slotDef struct {
-	role    string
-	label   string
-	emoji   string
-	max     int
-	style   discordgo.ButtonStyle
-	iconURL string // xivapi role icon used as embed thumbnail
+	role      string
+	label     string
+	fallback  string // Unicode emoji shown when application emoji is unavailable
+	max       int
+	style     discordgo.ButtonStyle
+	iconURL   string // xivapi.com role icon, downloaded and uploaded as app emoji
+	emojiName string // Discord emoji name (must be alphanumeric + underscores)
 }
 
 var stdComp = []slotDef{
-	{"tank",   "Tank",       "🛡️", 2, discordgo.PrimaryButton,   "https://xivapi.com/i/062000/062581.png"},
-	{"healer", "Healer",     "💚", 2, discordgo.SuccessButton,   "https://xivapi.com/i/062000/062582.png"},
-	{"melee",  "Melee DPS",  "⚔️", 2, discordgo.DangerButton,   "https://xivapi.com/i/062000/062583.png"},
-	{"ranged", "Ranged DPS", "🏹", 1, discordgo.SecondaryButton, "https://xivapi.com/i/062000/062584.png"},
-	{"caster", "Caster DPS", "🔮", 1, discordgo.PrimaryButton,   "https://xivapi.com/i/062000/062585.png"},
+	{"tank",   "Tank",       "🛡️", 2, discordgo.PrimaryButton,   "https://xivapi.com/i/062000/062581.png", "prs_tank"},
+	{"healer", "Healer",     "💚", 2, discordgo.SuccessButton,   "https://xivapi.com/i/062000/062582.png", "prs_healer"},
+	{"melee",  "Melee DPS",  "⚔️", 2, discordgo.DangerButton,   "https://xivapi.com/i/062000/062583.png", "prs_melee"},
+	{"ranged", "Ranged DPS", "🏹", 1, discordgo.SecondaryButton, "https://xivapi.com/i/062000/062584.png", "prs_ranged"},
+	{"caster", "Caster DPS", "🔮", 1, discordgo.PrimaryButton,   "https://xivapi.com/i/062000/062585.png", "prs_caster"},
 }
 
 type jobDef struct {
@@ -76,7 +81,6 @@ var jobsByRole = map[string][]jobDef{
 	},
 }
 
-// All jobs flattened — used for bench/tentative job selection.
 var allJobs []jobDef
 
 func init() {
@@ -92,7 +96,7 @@ type Signee struct {
 	DisplayName string `json:"display_name"`
 	Job         string `json:"job,omitempty"`
 	Late        bool   `json:"late,omitempty"`
-	Number      int    `json:"number"` // global sign-up order within this raid
+	Number      int    `json:"number"`
 }
 
 type Slot struct {
@@ -100,13 +104,12 @@ type Slot struct {
 	Signee *Signee `json:"signee,omitempty"`
 }
 
-// StatusEntry holds bench / tentative / absence registrations outside the main roster.
 type StatusEntry struct {
 	UserID      string `json:"user_id"`
 	DisplayName string `json:"display_name"`
 	Job         string `json:"job,omitempty"`
 	Type        string `json:"type"`   // "bench" | "tentative" | "absence"
-	Number      int    `json:"number"` // global sign-up order
+	Number      int    `json:"number"`
 }
 
 type Raid struct {
@@ -133,7 +136,6 @@ func (r *Raid) isFull() bool {
 	return true
 }
 
-// findUserAnywhere returns true if the user is in the main roster OR any status entry.
 func (r *Raid) findUserAnywhere(userID string) bool {
 	for _, sl := range r.Slots {
 		if sl.Signee != nil && sl.Signee.UserID == userID {
@@ -169,6 +171,10 @@ type Module struct {
 	dataFile string
 	mu       sync.Mutex
 	raids    map[string]*Raid
+
+	// roleEmoji is populated synchronously in OnLoad then never modified again,
+	// so it is safe to read from interaction handlers without holding mu.
+	roleEmoji map[string]*discordgo.ComponentEmoji // role -> app emoji
 }
 
 func New(dataFile string) *Module {
@@ -256,6 +262,66 @@ func (m *Module) HandleInteraction(s *discordgo.Session, i *discordgo.Interactio
 	}
 }
 
+// ── Module lifecycle ──────────────────────────────────────────────────────────
+
+func (m *Module) OnLoad(s *discordgo.Session) error {
+	m.load()
+	m.ensureRoleEmojis(s)
+	log.Println("[raid] module loaded")
+	return nil
+}
+
+func (m *Module) OnUnload(_ *discordgo.Session) error {
+	log.Println("[raid] module unloaded")
+	return nil
+}
+
+// ensureRoleEmojis uploads the five FF14 role icons as Discord application
+// emojis if they are not already present, then stores them in m.roleEmoji.
+// It is safe to call multiple times (idempotent).
+func (m *Module) ensureRoleEmojis(s *discordgo.Session) {
+	appID := s.State.User.ID
+
+	existing, err := s.ApplicationEmojis(appID)
+	if err != nil {
+		log.Printf("[raid] could not list application emojis: %v — role icons will fall back to Unicode", err)
+		return
+	}
+
+	byName := make(map[string]*discordgo.Emoji, len(existing))
+	for _, e := range existing {
+		byName[e.Name] = e
+	}
+
+	emojis := make(map[string]*discordgo.ComponentEmoji, len(stdComp))
+	for _, def := range stdComp {
+		if e, ok := byName[def.emojiName]; ok {
+			emojis[def.role] = &discordgo.ComponentEmoji{ID: e.ID, Name: e.Name}
+			log.Printf("[raid] reusing application emoji %s (ID: %s)", def.emojiName, e.ID)
+			continue
+		}
+
+		imgData, err := fetchImage(def.iconURL)
+		if err != nil {
+			log.Printf("[raid] could not download icon for %s: %v", def.role, err)
+			continue
+		}
+		b64 := base64.StdEncoding.EncodeToString(imgData)
+		created, err := s.ApplicationEmojiCreate(appID, &discordgo.EmojiParams{
+			Name:  def.emojiName,
+			Image: "data:image/png;base64," + b64,
+		})
+		if err != nil {
+			log.Printf("[raid] could not create application emoji %s: %v", def.emojiName, err)
+			continue
+		}
+		emojis[def.role] = &discordgo.ComponentEmoji{ID: created.ID, Name: created.Name}
+		log.Printf("[raid] created application emoji %s (ID: %s)", def.emojiName, created.ID)
+	}
+
+	m.roleEmoji = emojis
+}
+
 // ── Slash command handlers ────────────────────────────────────────────────────
 
 func (m *Module) handleCreate(s *discordgo.Session, i *discordgo.InteractionCreate, sub *discordgo.ApplicationCommandInteractionDataOption) {
@@ -287,8 +353,8 @@ func (m *Module) handleCreate(s *discordgo.Session, i *discordgo.InteractionCrea
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Embeds:     []*discordgo.MessageEmbed{buildEmbed(raid)},
-			Components: buildComponents(raid),
+			Embeds:     []*discordgo.MessageEmbed{m.buildEmbed(raid)},
+			Components: m.buildComponents(raid),
 		},
 	}); err != nil {
 		log.Printf("[raid] create respond error: %v", err)
@@ -328,16 +394,14 @@ func (m *Module) handleClose(s *discordgo.Session, i *discordgo.InteractionCreat
 		ephemeralRespond(s, i, "Sign-ups for this raid are already closed.")
 		return
 	}
-	isCreator := raid.CreatorID == i.Member.User.ID
-	isAdmin := i.Member.Permissions&discordgo.PermissionManageServer != 0
-	if !isCreator && !isAdmin {
+	if raid.CreatorID != i.Member.User.ID && i.Member.Permissions&discordgo.PermissionManageServer == 0 {
 		m.mu.Unlock()
 		ephemeralRespond(s, i, "❌ Only the raid creator or a server admin can close sign-ups.")
 		return
 	}
 	raid.Closed = true
-	embed := buildEmbed(raid)
-	components := buildComponents(raid)
+	embed := m.buildEmbed(raid)
+	components := m.buildComponents(raid)
 	channelID, messageID, title := raid.ChannelID, raid.MessageID, raid.Title
 	m.mu.Unlock()
 	m.save()
@@ -394,18 +458,6 @@ func (m *Module) handleList(s *discordgo.Session, i *discordgo.InteractionCreate
 }
 
 // ── Component routing ─────────────────────────────────────────────────────────
-//
-// Custom ID format: "raid:<action>:<raidID>[:<extra>]"
-//
-//   join:<raidID>:<role>       — role button; shows job dropdown
-//   select:<raidID>:<role>     — job dropdown for main roster
-//   withdraw:<raidID>          — remove from roster / status list
-//   bench:<raidID>             — bench button; shows job dropdown
-//   selectbench:<raidID>       — job dropdown for bench
-//   late:<raidID>              — toggle late status on main-roster slot
-//   tentative:<raidID>         — shows job dropdown for tentative
-//   selecttent:<raidID>        — job dropdown for tentative
-//   absence:<raidID>           — toggle absence entry (no job needed)
 
 func (m *Module) handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	parts := strings.SplitN(i.MessageComponentData().CustomID, ":", 4)
@@ -529,8 +581,8 @@ func (m *Module) handleJobSelect(s *discordgo.Session, i *discordgo.InteractionC
 	if raid.isFull() {
 		raid.Closed = true
 	}
-	embed := buildEmbed(raid)
-	components := buildComponents(raid)
+	embed := m.buildEmbed(raid)
+	components := m.buildComponents(raid)
 	channelID, messageID, closed := raid.ChannelID, raid.MessageID, raid.Closed
 	m.mu.Unlock()
 	m.save()
@@ -539,7 +591,6 @@ func (m *Module) handleJobSelect(s *discordgo.Session, i *discordgo.InteractionC
 		Channel: channelID, ID: messageID,
 		Embeds: &[]*discordgo.MessageEmbed{embed}, Components: &components,
 	})
-
 	msg := fmt.Sprintf("✅ Signed up as **%s**!", jobLabel)
 	if closed {
 		msg += "\n🔒 The raid is now full — sign-ups are closed."
@@ -584,15 +635,14 @@ func (m *Module) handleWithdraw(s *discordgo.Session, i *discordgo.InteractionCr
 		}
 		raid.StatusEntries = newEntries
 	}
-
 	if !removed {
 		m.mu.Unlock()
 		ephemeralRespond(s, i, "You're not registered for this raid.")
 		return
 	}
 
-	embed := buildEmbed(raid)
-	components := buildComponents(raid)
+	embed := m.buildEmbed(raid)
+	components := m.buildComponents(raid)
 	channelID, messageID := raid.ChannelID, raid.MessageID
 	m.mu.Unlock()
 	m.save()
@@ -608,7 +658,6 @@ func (m *Module) handleWithdraw(s *discordgo.Session, i *discordgo.InteractionCr
 
 func (m *Module) handleBench(s *discordgo.Session, i *discordgo.InteractionCreate, raidID string) {
 	user := i.Member.User
-
 	m.mu.Lock()
 	raid, ok := m.raids[raidID]
 	if !ok || raid.GuildID != i.GuildID {
@@ -627,9 +676,7 @@ func (m *Module) handleBench(s *discordgo.Session, i *discordgo.InteractionCreat
 		return
 	}
 	m.mu.Unlock()
-
-	showJobSelect(s, i, "raid:selectbench:"+raidID,
-		"Choose your job for **Bench**:", allJobs)
+	showJobSelect(s, i, "raid:selectbench:"+raidID, "Choose your job for **Bench**:", allJobs)
 }
 
 func (m *Module) handleBenchSelect(s *discordgo.Session, i *discordgo.InteractionCreate, raidID string) {
@@ -658,14 +705,11 @@ func (m *Module) handleBenchSelect(s *discordgo.Session, i *discordgo.Interactio
 		return
 	}
 	raid.StatusEntries = append(raid.StatusEntries, StatusEntry{
-		UserID:      user.ID,
-		DisplayName: displayName(user),
-		Job:         jobKey,
-		Type:        "bench",
-		Number:      raid.nextNum(),
+		UserID: user.ID, DisplayName: displayName(user),
+		Job: jobKey, Type: "bench", Number: raid.nextNum(),
 	})
-	embed := buildEmbed(raid)
-	components := buildComponents(raid)
+	embed := m.buildEmbed(raid)
+	components := m.buildComponents(raid)
 	channelID, messageID := raid.ChannelID, raid.MessageID
 	m.mu.Unlock()
 	m.save()
@@ -681,7 +725,6 @@ func (m *Module) handleBenchSelect(s *discordgo.Session, i *discordgo.Interactio
 
 func (m *Module) handleLate(s *discordgo.Session, i *discordgo.InteractionCreate, raidID string) {
 	user := i.Member.User
-
 	m.mu.Lock()
 	raid, ok := m.raids[raidID]
 	if !ok || raid.GuildID != i.GuildID {
@@ -694,8 +737,6 @@ func (m *Module) handleLate(s *discordgo.Session, i *discordgo.InteractionCreate
 		ephemeralRespond(s, i, "Sign-ups for this raid are closed.")
 		return
 	}
-
-	// Find the user in the main roster and toggle late.
 	found := false
 	var msg string
 	for idx := range raid.Slots {
@@ -715,9 +756,8 @@ func (m *Module) handleLate(s *discordgo.Session, i *discordgo.InteractionCreate
 		ephemeralRespond(s, i, "You need to sign up for a role first before marking yourself as late.")
 		return
 	}
-
-	embed := buildEmbed(raid)
-	components := buildComponents(raid)
+	embed := m.buildEmbed(raid)
+	components := m.buildComponents(raid)
 	channelID, messageID := raid.ChannelID, raid.MessageID
 	m.mu.Unlock()
 	m.save()
@@ -733,7 +773,6 @@ func (m *Module) handleLate(s *discordgo.Session, i *discordgo.InteractionCreate
 
 func (m *Module) handleTentative(s *discordgo.Session, i *discordgo.InteractionCreate, raidID string) {
 	user := i.Member.User
-
 	m.mu.Lock()
 	raid, ok := m.raids[raidID]
 	if !ok || raid.GuildID != i.GuildID {
@@ -752,9 +791,7 @@ func (m *Module) handleTentative(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 	m.mu.Unlock()
-
-	showJobSelect(s, i, "raid:selecttent:"+raidID,
-		"Choose your job for **Tentative**:", allJobs)
+	showJobSelect(s, i, "raid:selecttent:"+raidID, "Choose your job for **Tentative**:", allJobs)
 }
 
 func (m *Module) handleTentSelect(s *discordgo.Session, i *discordgo.InteractionCreate, raidID string) {
@@ -783,14 +820,11 @@ func (m *Module) handleTentSelect(s *discordgo.Session, i *discordgo.Interaction
 		return
 	}
 	raid.StatusEntries = append(raid.StatusEntries, StatusEntry{
-		UserID:      user.ID,
-		DisplayName: displayName(user),
-		Job:         jobKey,
-		Type:        "tentative",
-		Number:      raid.nextNum(),
+		UserID: user.ID, DisplayName: displayName(user),
+		Job: jobKey, Type: "tentative", Number: raid.nextNum(),
 	})
-	embed := buildEmbed(raid)
-	components := buildComponents(raid)
+	embed := m.buildEmbed(raid)
+	components := m.buildComponents(raid)
 	channelID, messageID := raid.ChannelID, raid.MessageID
 	m.mu.Unlock()
 	m.save()
@@ -806,7 +840,6 @@ func (m *Module) handleTentSelect(s *discordgo.Session, i *discordgo.Interaction
 
 func (m *Module) handleAbsence(s *discordgo.Session, i *discordgo.InteractionCreate, raidID string) {
 	user := i.Member.User
-
 	m.mu.Lock()
 	raid, ok := m.raids[raidID]
 	if !ok || raid.GuildID != i.GuildID {
@@ -819,13 +852,12 @@ func (m *Module) handleAbsence(s *discordgo.Session, i *discordgo.InteractionCre
 		ephemeralRespond(s, i, "Sign-ups for this raid are closed.")
 		return
 	}
-
-	// Toggle: if already marked absent, remove it.
+	// Toggle off if already absent.
 	for idx, se := range raid.StatusEntries {
 		if se.UserID == user.ID && se.Type == "absence" {
 			raid.StatusEntries = append(raid.StatusEntries[:idx], raid.StatusEntries[idx+1:]...)
-			embed := buildEmbed(raid)
-			components := buildComponents(raid)
+			embed := m.buildEmbed(raid)
+			components := m.buildComponents(raid)
 			channelID, messageID := raid.ChannelID, raid.MessageID
 			m.mu.Unlock()
 			m.save()
@@ -837,22 +869,17 @@ func (m *Module) handleAbsence(s *discordgo.Session, i *discordgo.InteractionCre
 			return
 		}
 	}
-
-	// Already signed up as something else — require withdraw first.
 	if raid.findUserAnywhere(user.ID) {
 		m.mu.Unlock()
 		ephemeralRespond(s, i, "You're already registered. Click **Withdraw** first to change.")
 		return
 	}
-
 	raid.StatusEntries = append(raid.StatusEntries, StatusEntry{
-		UserID:      user.ID,
-		DisplayName: displayName(user),
-		Type:        "absence",
-		Number:      raid.nextNum(),
+		UserID: user.ID, DisplayName: displayName(user),
+		Type: "absence", Number: raid.nextNum(),
 	})
-	embed := buildEmbed(raid)
-	components := buildComponents(raid)
+	embed := m.buildEmbed(raid)
+	components := m.buildComponents(raid)
 	channelID, messageID := raid.ChannelID, raid.MessageID
 	m.mu.Unlock()
 	m.save()
@@ -866,8 +893,7 @@ func (m *Module) handleAbsence(s *discordgo.Session, i *discordgo.InteractionCre
 
 // ── Embed builder ─────────────────────────────────────────────────────────────
 
-func buildEmbed(raid *Raid) *discordgo.MessageEmbed {
-	// ── Description: tagline + date line ────────────────────────────────────
+func (m *Module) buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 	var descLines []string
 	if raid.Description != "" {
 		descLines = append(descLines, raid.Description)
@@ -877,7 +903,6 @@ func buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 			fmt.Sprintf("📅 <t:%d:D>  ·  🕐 <t:%d:t>  ·  ⏳ <t:%d:R>", raid.UnixTime, raid.UnixTime, raid.UnixTime))
 	}
 
-	// ── Per-role roster fields (inline) ─────────────────────────────────────
 	filledByRole := map[string]int{}
 	for _, sl := range raid.Slots {
 		if sl.Signee != nil {
@@ -887,6 +912,7 @@ func buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 
 	var fields []*discordgo.MessageEmbedField
 	for _, def := range stdComp {
+		icon := m.emojiText(def.role, def.fallback)
 		var lines []string
 		for _, sl := range raid.Slots {
 			if sl.Role != def.role {
@@ -906,18 +932,15 @@ func buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 			}
 		}
 		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   fmt.Sprintf("%s %s (%d/%d)", def.emoji, def.label, filledByRole[def.role], def.max),
+			Name:   fmt.Sprintf("%s %s (%d/%d)", icon, def.label, filledByRole[def.role], def.max),
 			Value:  strings.Join(lines, "\n"),
 			Inline: true,
 		})
 	}
 
-	// ── Status sections (non-inline, only if populated) ──────────────────────
-	type statusSection struct {
-		typ   string
-		label string
-	}
-	for _, sec := range []statusSection{
+	for _, sec := range []struct {
+		typ, label string
+	}{
 		{"bench", "🪑 Bench"},
 		{"tentative", "⚖️ Tentative"},
 		{"absence", "❌ Absence"},
@@ -942,7 +965,6 @@ func buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 		}
 	}
 
-	// ── Assemble embed ───────────────────────────────────────────────────────
 	title := "📋 " + raid.Title
 	if raid.Closed {
 		title = "🔒 " + raid.Title
@@ -955,8 +977,6 @@ func buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 		Fields:      fields,
 		Footer:      &discordgo.MessageEmbedFooter{Text: "ID: " + raid.ID},
 	}
-
-	// Thumbnail: first role that still needs players.
 	if !raid.Closed {
 		for _, def := range stdComp {
 			if filledByRole[def.role] < def.max {
@@ -965,13 +985,12 @@ func buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 			}
 		}
 	}
-
 	return embed
 }
 
 // ── Component builder ─────────────────────────────────────────────────────────
 
-func buildComponents(raid *Raid) []discordgo.MessageComponent {
+func (m *Module) buildComponents(raid *Raid) []discordgo.MessageComponent {
 	filledByRole := map[string]int{}
 	for _, sl := range raid.Slots {
 		if sl.Signee != nil {
@@ -979,53 +998,32 @@ func buildComponents(raid *Raid) []discordgo.MessageComponent {
 		}
 	}
 
-	// Row 1: role join buttons
 	joinRow := make([]discordgo.MessageComponent, 0, len(stdComp))
 	for _, def := range stdComp {
-		joinRow = append(joinRow, discordgo.Button{
-			Label:    def.emoji + " " + def.label,
+		btn := discordgo.Button{
+			Label:    def.label,
 			Style:    def.style,
 			CustomID: fmt.Sprintf("raid:join:%s:%s", raid.ID, def.role),
 			Disabled: filledByRole[def.role] >= def.max || raid.Closed,
-		})
+		}
+		if e, ok := m.roleEmoji[def.role]; ok {
+			btn.Emoji = e
+			// Label is kept so screen readers and hover text still show the role name.
+		} else {
+			btn.Label = def.fallback + " " + def.label
+		}
+		joinRow = append(joinRow, btn)
 	}
 
-	// Row 2: status buttons
 	statusRow := []discordgo.MessageComponent{
-		discordgo.Button{
-			Label:    "🪑 Bench",
-			Style:    discordgo.SecondaryButton,
-			CustomID: "raid:bench:" + raid.ID,
-			Disabled: raid.Closed,
-		},
-		discordgo.Button{
-			Label:    "🕐 Late",
-			Style:    discordgo.SecondaryButton,
-			CustomID: "raid:late:" + raid.ID,
-			Disabled: raid.Closed,
-		},
-		discordgo.Button{
-			Label:    "⚖️ Tentative",
-			Style:    discordgo.SecondaryButton,
-			CustomID: "raid:tentative:" + raid.ID,
-			Disabled: raid.Closed,
-		},
-		discordgo.Button{
-			Label:    "❌ Absence",
-			Style:    discordgo.SecondaryButton,
-			CustomID: "raid:absence:" + raid.ID,
-			Disabled: raid.Closed,
-		},
+		discordgo.Button{Label: "🪑 Bench", Style: discordgo.SecondaryButton, CustomID: "raid:bench:" + raid.ID, Disabled: raid.Closed},
+		discordgo.Button{Label: "🕐 Late", Style: discordgo.SecondaryButton, CustomID: "raid:late:" + raid.ID, Disabled: raid.Closed},
+		discordgo.Button{Label: "⚖️ Tentative", Style: discordgo.SecondaryButton, CustomID: "raid:tentative:" + raid.ID, Disabled: raid.Closed},
+		discordgo.Button{Label: "❌ Absence", Style: discordgo.SecondaryButton, CustomID: "raid:absence:" + raid.ID, Disabled: raid.Closed},
 	}
 
-	// Row 3: withdraw
 	withdrawRow := []discordgo.MessageComponent{
-		discordgo.Button{
-			Label:    "🚪 Withdraw",
-			Style:    discordgo.DangerButton,
-			CustomID: "raid:withdraw:" + raid.ID,
-			Disabled: raid.Closed,
-		},
+		discordgo.Button{Label: "🚪 Withdraw", Style: discordgo.DangerButton, CustomID: "raid:withdraw:" + raid.ID, Disabled: raid.Closed},
 	}
 
 	return []discordgo.MessageComponent{
@@ -1033,19 +1031,6 @@ func buildComponents(raid *Raid) []discordgo.MessageComponent {
 		discordgo.ActionsRow{Components: statusRow},
 		discordgo.ActionsRow{Components: withdrawRow},
 	}
-}
-
-// ── Module lifecycle ──────────────────────────────────────────────────────────
-
-func (m *Module) OnLoad(_ *discordgo.Session) error {
-	m.load()
-	log.Println("[raid] module loaded")
-	return nil
-}
-
-func (m *Module) OnUnload(_ *discordgo.Session) error {
-	log.Println("[raid] module unloaded")
-	return nil
 }
 
 // ── Persistence ───────────────────────────────────────────────────────────────
@@ -1080,6 +1065,14 @@ func (m *Module) load() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// emojiText returns "<:name:id>" if the role has an application emoji, else fallback.
+func (m *Module) emojiText(role, fallback string) string {
+	if e, ok := m.roleEmoji[role]; ok && e != nil && e.ID != "" {
+		return fmt.Sprintf("<:%s:%s>", e.Name, e.ID)
+	}
+	return fallback
+}
+
 func roleName(role string) string {
 	for _, def := range stdComp {
 		if def.role == role {
@@ -1107,14 +1100,10 @@ func displayName(u *discordgo.User) string {
 	return u.Username
 }
 
-// showJobSelect sends an ephemeral job dropdown using the provided jobs list.
 func showJobSelect(s *discordgo.Session, i *discordgo.InteractionCreate, customID, prompt string, jobs []jobDef) {
 	options := make([]discordgo.SelectMenuOption, 0, len(jobs))
 	for _, j := range jobs {
-		options = append(options, discordgo.SelectMenuOption{
-			Label: j.name,
-			Value: j.key,
-		})
+		options = append(options, discordgo.SelectMenuOption{Label: j.name, Value: j.key})
 	}
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -1123,11 +1112,7 @@ func showJobSelect(s *discordgo.Session, i *discordgo.InteractionCreate, customI
 			Flags:   discordgo.MessageFlagsEphemeral,
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					discordgo.SelectMenu{
-						CustomID:    customID,
-						Placeholder: "Select a job…",
-						Options:     options,
-					},
+					discordgo.SelectMenu{CustomID: customID, Placeholder: "Select a job…", Options: options},
 				}},
 			},
 		},
@@ -1137,21 +1122,27 @@ func showJobSelect(s *discordgo.Session, i *discordgo.InteractionCreate, customI
 func ephemeralRespond(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: content,
-			Flags:   discordgo.MessageFlagsEphemeral,
-		},
+		Data: &discordgo.InteractionResponseData{Content: content, Flags: discordgo.MessageFlagsEphemeral},
 	})
 }
 
 func updateEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
-		Data: &discordgo.InteractionResponseData{
-			Content:    content,
-			Components: []discordgo.MessageComponent{},
-		},
+		Data: &discordgo.InteractionResponseData{Content: content, Components: []discordgo.MessageComponent{}},
 	})
+}
+
+func fetchImage(url string) ([]byte, error) {
+	resp, err := http.Get(url) //nolint:gosec
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d fetching %s", resp.StatusCode, url)
+	}
+	return io.ReadAll(resp.Body)
 }
 
 func newID() string {
