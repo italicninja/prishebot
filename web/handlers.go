@@ -157,13 +157,19 @@ func (s *Server) handleServerPage(c *gin.Context) {
 		Name        string
 		Description string
 		Enabled     bool
+		Commands    []string
 	}
 	var rows []ModuleRow
 	for name, mod := range modules {
+		var cmds []string
+		for _, c := range mod.Commands() {
+			cmds = append(cmds, commandSignatures(c)...)
+		}
 		rows = append(rows, ModuleRow{
 			Name:        name,
 			Description: mod.Description(),
 			Enabled:     settings[name],
+			Commands:    cmds,
 		})
 	}
 
@@ -519,4 +525,37 @@ func parseHTMLColor(s string) int {
 // Returned by value so we can take its address inline in a single expression.
 func discordRoleParams(name string, color int) discordgo.RoleParams {
 	return discordgo.RoleParams{Name: name, Color: &color}
+}
+
+// commandSignatures returns one formatted string per top-level invocation path
+// for a slash command, e.g. "/raid create <title> [description]".
+// Subcommand groups are flattened so each leaf produces its own line.
+func commandSignatures(cmd *discordgo.ApplicationCommand) []string {
+	return buildSigs("/"+cmd.Name, cmd.Options)
+}
+
+func buildSigs(prefix string, opts []*discordgo.ApplicationCommandOption) []string {
+	// If the first option is a subcommand (or group), recurse rather than
+	// treating them as positional parameters.
+	if len(opts) > 0 &&
+		(opts[0].Type == discordgo.ApplicationCommandOptionSubCommand ||
+			opts[0].Type == discordgo.ApplicationCommandOptionSubCommandGroup) {
+		var out []string
+		for _, o := range opts {
+			out = append(out, buildSigs(prefix+" "+o.Name, o.Options)...)
+		}
+		return out
+	}
+
+	// Leaf command — append required then optional parameters.
+	var sb strings.Builder
+	sb.WriteString(prefix)
+	for _, o := range opts {
+		if o.Required {
+			fmt.Fprintf(&sb, " <%s>", o.Name)
+		} else {
+			fmt.Fprintf(&sb, " [%s]", o.Name)
+		}
+	}
+	return []string{sb.String()}
 }

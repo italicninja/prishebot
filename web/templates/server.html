@@ -75,6 +75,11 @@
             <div class="module-info">
               <h3>{{ .Name }}</h3>
               <p>{{ .Description }}</p>
+              {{ if .Commands }}
+              <div class="module-commands">
+                {{ range .Commands }}<code>{{ . }}</code>{{ end }}
+              </div>
+              {{ end }}
             </div>
             <label class="toggle" title="Toggle {{ .Name }}">
               <input type="checkbox" name="module_{{ .Name }}"{{ if .Enabled }} checked{{ end }}>
