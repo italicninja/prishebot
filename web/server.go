@@ -69,6 +69,13 @@ func (s *Server) routes() *gin.Engine {
 	}
 	r.StaticFS("/static", http.FS(staticFS))
 
+	// Serve downloaded FF14 icons from the on-disk icons directory.
+	// This avoids cross-origin loads to xivapi.com on every page view.
+	// The directory is populated by running: go run ./scripts/download_icons
+	if s.cfg.IconsDir != "" {
+		r.Static("/icons", s.cfg.IconsDir)
+	}
+
 	// ── Public ──────────────────────────────────────────────────────────────
 	r.GET("/", s.handleHome)
 	r.GET("/login", s.handleLogin)

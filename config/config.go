@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/joho/godotenv"
 )
@@ -21,6 +22,9 @@ type Config struct {
 	SecureCookies bool   // Set true in production (requires HTTPS)
 	BirthdayDataFile string // Path to birthday persistence file (default: birthdays.json)
 	RolesDataFile    string // Path to roles persistence file (default: roles.json)
+	RaidDataFile     string // Path to raid sign-up persistence file (default: raids.json)
+	IconsDir         string // Directory where downloaded FF14 icons are stored
+	BaseURL          string // Public URL of the web server, used to build icon URLs (e.g. https://mybot.railway.app)
 }
 
 // Load reads config from a .env file (if present) and then from environment
@@ -46,6 +50,9 @@ func Load() *Config {
 		SecureCookies: os.Getenv("SECURE_COOKIES") == "true",
 		BirthdayDataFile: getOrDefault("BIRTHDAY_DATA_FILE", "birthdays.json"),
 		RolesDataFile:    getOrDefault("ROLES_DATA_FILE", "roles.json"),
+		RaidDataFile:     getOrDefault("RAID_DATA_FILE", "raids.json"),
+		IconsDir:         getOrDefault("ICONS_DIR", filepath.Join("web", "static", "icons", "ffxiv")),
+		BaseURL:          os.Getenv("BASE_URL"), // empty = icons not served; Discord embeds use emoji only
 	}
 }
 

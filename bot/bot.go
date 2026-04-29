@@ -3,6 +3,7 @@ package bot
 import (
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -276,31 +277,44 @@ func (b *Bot) GuildModuleSettings(guildID string) map[string]bool {
 	return out
 }
 
-// handleInteraction is the single entry point for all Discord slash command
-// interactions. It looks up which module owns the command and delegates to it,
-// first checking the per-guild enable/disable setting.
+// handleInteraction is the single entry point for all Discord interactions.
+// It routes slash commands by command name and button/select interactions by
+// the module-name prefix in the custom ID (e.g. "raid:join:..." → "raid" module).
 func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	var m Module
+	var ok bool
+
 	switch i.Type {
 	case discordgo.InteractionApplicationCommand, discordgo.InteractionApplicationCommandAutocomplete:
+		cmdName := i.ApplicationCommandData().Name
+		b.mu.RLock()
+		m, ok = b.cmdOwners[cmdName]
+		b.mu.RUnlock()
+		if !ok {
+			log.Printf("[bot] received unknown command: /%s", cmdName)
+			return
+		}
+
+	case discordgo.InteractionMessageComponent:
+		// Custom IDs are prefixed with the owning module's name: "modulename:..."
+		customID := i.MessageComponentData().CustomID
+		prefix, _, _ := strings.Cut(customID, ":")
+		b.mu.RLock()
+		m, ok = b.modules[prefix]
+		b.mu.RUnlock()
+		if !ok {
+			return
+		}
+
 	default:
-		return
-	}
-
-	cmdName := i.ApplicationCommandData().Name
-
-	b.mu.RLock()
-	m, ok := b.cmdOwners[cmdName]
-	b.mu.RUnlock()
-
-	if !ok {
-		log.Printf("[bot] received unknown command: /%s", cmdName)
 		return
 	}
 
 	// Guild-specific enable/disable check. DM interactions have no GuildID.
 	if i.GuildID != "" && !b.IsModuleEnabled(i.GuildID, m.Name()) {
-		// For autocomplete we can't send a regular message response — just drop it.
-		if i.Type == discordgo.InteractionApplicationCommandAutocomplete {
+		// Autocomplete and component interactions can't receive a plain message — drop silently.
+		if i.Type == discordgo.InteractionApplicationCommandAutocomplete ||
+			i.Type == discordgo.InteractionMessageComponent {
 			return
 		}
 		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -310,7 +324,7 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		}); err != nil {
-			log.Printf("[bot] failed to send disabled-module response for /%s: %v", cmdName, err)
+			log.Printf("[bot] failed to send disabled-module response: %v", err)
 		}
 		return
 	}
