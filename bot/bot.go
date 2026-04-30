@@ -37,7 +37,7 @@ type Bot struct {
 	// when commands are created. We need these IDs to delete commands on unload.
 	registeredCmds map[string][]*discordgo.ApplicationCommand
 
-	stopPresence chan struct{}
+	startTime time.Time
 }
 
 // New creates a Bot and opens the underlying discordgo session.
@@ -64,7 +64,6 @@ func New(cfg *config.Config) (*Bot, error) {
 		cmdOwners:      make(map[string]Module),
 		guildSettings:  make(map[string]map[string]bool),
 		registeredCmds: make(map[string][]*discordgo.ApplicationCommand),
-		stopPresence:   make(chan struct{}),
 	}
 
 	// Register the single interaction handler. discordgo calls this for every
@@ -76,6 +75,7 @@ func New(cfg *config.Config) (*Bot, error) {
 
 // Start opens the WebSocket connection to Discord.
 func (b *Bot) Start() error {
+	b.startTime = time.Now()
 	if err := b.session.Open(); err != nil {
 		return fmt.Errorf("opening discord session: %w", err)
 	}
@@ -84,13 +84,29 @@ func (b *Bot) Start() error {
 	} else {
 		log.Println("[bot] connected")
 	}
-	go b.rotatePresence()
+	b.setOnlinePresence()
 	return nil
 }
 
+// setOnlinePresence sets a static "online since MM/DD/YY HH:MM:SS" activity.
+func (b *Bot) setOnlinePresence() {
+	since := b.startTime.UTC().Format("01/02/06 15:04:05")
+	if err := b.session.UpdateStatusComplex(discordgo.UpdateStatusData{
+		Status: "online",
+		Activities: []*discordgo.Activity{{
+			Name: "online since " + since,
+			Type: discordgo.ActivityTypeCustom,
+		}},
+	}); err != nil {
+		log.Printf("[bot] failed to set presence: %v", err)
+	}
+}
+
+// StartTime returns the time at which Start() was called.
+func (b *Bot) StartTime() time.Time { return b.startTime }
+
 // Stop cleanly unloads all modules and closes the Discord connection.
 func (b *Bot) Stop() {
-	close(b.stopPresence)
 	b.mu.Lock()
 	for _, m := range b.modules {
 		if err := m.OnUnload(b.session); err != nil {
@@ -99,57 +115,6 @@ func (b *Bot) Stop() {
 	}
 	b.mu.Unlock()
 	b.session.Close()
-}
-
-// presencePool is the rotation of status messages Prishe cycles through.
-var presencePool = []struct {
-	name string
-	kind discordgo.ActivityType
-}{
-	{"your birthdays 🎂", discordgo.ActivityTypeListening},
-	{"/ping", discordgo.ActivityTypeGame},
-	{"anime 🌸", discordgo.ActivityTypeWatching},
-	{"your slash commands ✨", discordgo.ActivityTypeListening},
-	{"for birthdays 🎉", discordgo.ActivityTypeWatching},
-}
-
-// rotatePresence cycles through presencePool every 30 seconds, with one slot
-// showing the live server count.
-func (b *Bot) rotatePresence() {
-	idx := 0
-	set := func() {
-		var activity *discordgo.Activity
-		// Every other rotation show the live server count.
-		if idx%2 == 0 {
-			n := len(b.session.State.Guilds)
-			activity = &discordgo.Activity{
-				Name: fmt.Sprintf("over %d server(s) 🗂️", n),
-				Type: discordgo.ActivityTypeWatching,
-			}
-		} else {
-			p := presencePool[idx%len(presencePool)]
-			activity = &discordgo.Activity{Name: p.name, Type: p.kind}
-		}
-		if err := b.session.UpdateStatusComplex(discordgo.UpdateStatusData{
-			Status:     "online",
-			Activities: []*discordgo.Activity{activity},
-		}); err != nil {
-			log.Printf("[bot] failed to update presence: %v", err)
-		}
-		idx++
-	}
-
-	set()
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			set()
-		case <-b.stopPresence:
-			return
-		}
-	}
 }
 
 // LoadModule registers a module with the bot and creates its slash commands.

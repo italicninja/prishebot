@@ -1,11 +1,16 @@
 // Package info provides /serverinfo and /botinfo slash commands.
-// It shows a slightly more realistic module: one module, multiple commands.
+// On load it also pushes all bot stats into the application's "About Me"
+// description via PATCH /applications/@me so they appear on Prishe's
+// Discord profile card.
 package info
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -13,9 +18,16 @@ import (
 const discordBlurple = 0x5865F2
 
 // Module implements bot.Module for server and bot information commands.
-type Module struct{}
+type Module struct {
+	appID     string
+	startTime time.Time
+}
 
-func New() *Module { return &Module{} }
+// New creates the info module. appID is the Discord application / client ID;
+// startTime is when the process started (used in both status and bio).
+func New(appID string, startTime time.Time) *Module {
+	return &Module{appID: appID, startTime: startTime}
+}
 
 func (m *Module) Name() string        { return "info" }
 func (m *Module) Description() string { return "Provides /serverinfo and /botinfo slash commands." }
@@ -34,7 +46,6 @@ func (m *Module) Commands() []*discordgo.ApplicationCommand {
 }
 
 // HandleInteraction dispatches to the correct handler based on the command name.
-// This is the standard pattern when a module owns more than one command.
 func (m *Module) HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	switch i.ApplicationCommandData().Name {
 	case "serverinfo":
@@ -43,6 +54,51 @@ func (m *Module) HandleInteraction(s *discordgo.Session, i *discordgo.Interactio
 		m.botInfo(s, i)
 	}
 }
+
+func (m *Module) OnLoad(s *discordgo.Session) error {
+	// Update the application description (shown as "About Me" on Prishe's
+	// Discord profile) with the key stats. This is a plain HTTP call so it
+	// works before the WebSocket is opened.
+	m.updateBio(s)
+	log.Println("[info] module loaded")
+	return nil
+}
+
+func (m *Module) OnUnload(_ *discordgo.Session) error {
+	log.Println("[info] module unloaded")
+	return nil
+}
+
+// updateBio pushes stats into the application description via the Discord API.
+// Errors are logged but not fatal — the bio is cosmetic.
+func (m *Module) updateBio(s *discordgo.Session) {
+	var lines []string
+	lines = append(lines, "Online since "+m.startTime.UTC().Format("01/02/06 15:04:05 UTC"))
+	lines = append(lines, "ID: "+m.appID)
+	if env := os.Getenv("RAILWAY_ENVIRONMENT_NAME"); env != "" {
+		lines = append(lines, "Environment: "+env)
+	}
+	if region := os.Getenv("RAILWAY_REPLICA_REGION"); region != "" {
+		lines = append(lines, "Region: "+region)
+	}
+	if svc := os.Getenv("RAILWAY_SERVICE_NAME"); svc != "" {
+		lines = append(lines, "Service: "+svc)
+	}
+
+	type appPatch struct {
+		Description string `json:"description"`
+	}
+	body, _ := json.Marshal(appPatch{Description: strings.Join(lines, "\n")})
+
+	endpoint := discordgo.EndpointApplication(m.appID)
+	if _, err := s.RequestWithBucketID("PATCH", endpoint, body, endpoint); err != nil {
+		log.Printf("[info] could not update application description: %v", err)
+	} else {
+		log.Println("[info] updated application description (bio)")
+	}
+}
+
+// ── Slash commands ─────────────────────────────────────────────────────────
 
 func (m *Module) serverInfo(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	guild, err := s.Guild(i.GuildID)
@@ -57,11 +113,11 @@ func (m *Module) serverInfo(s *discordgo.Session, i *discordgo.InteractionCreate
 		Description: fmt.Sprintf("ID: `%s`", guild.ID),
 		Color:       discordBlurple,
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Owner", Value: fmt.Sprintf("<@%s>", guild.OwnerID), Inline: true},
-			{Name: "Members", Value: fmt.Sprintf("%d", guild.MemberCount), Inline: true},
-			{Name: "Locale", Value: guild.PreferredLocale, Inline: true},
-			{Name: "Channels", Value: fmt.Sprintf("%d", len(guild.Channels)), Inline: true},
-			{Name: "Roles", Value: fmt.Sprintf("%d", len(guild.Roles)), Inline: true},
+			{Name: "Owner",    Value: fmt.Sprintf("<@%s>", guild.OwnerID),        Inline: true},
+			{Name: "Members",  Value: fmt.Sprintf("%d", guild.MemberCount),       Inline: true},
+			{Name: "Locale",   Value: guild.PreferredLocale,                       Inline: true},
+			{Name: "Channels", Value: fmt.Sprintf("%d", len(guild.Channels)),     Inline: true},
+			{Name: "Roles",    Value: fmt.Sprintf("%d", len(guild.Roles)),        Inline: true},
 		},
 	}
 	if guild.Icon != "" {
@@ -86,33 +142,30 @@ func (m *Module) botInfo(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	self := s.State.User
 
+	// Build description: all the stats that also live in the bio.
+	var desc strings.Builder
+	fmt.Fprintf(&desc, "Online since `%s`\n", m.startTime.UTC().Format("01/02/06 15:04:05 UTC"))
+	fmt.Fprintf(&desc, "Active in **%d** server(s)\n", len(s.State.Guilds))
+	fmt.Fprintf(&desc, "ID: `%s`\n", self.ID)
+	if env := os.Getenv("RAILWAY_ENVIRONMENT_NAME"); env != "" {
+		fmt.Fprintf(&desc, "Environment: `%s`\n", env)
+	}
+	if region := os.Getenv("RAILWAY_REPLICA_REGION"); region != "" {
+		fmt.Fprintf(&desc, "Region: `%s`\n", region)
+	}
+	if svc := os.Getenv("RAILWAY_SERVICE_NAME"); svc != "" {
+		fmt.Fprintf(&desc, "Service: `%s`", svc)
+	}
+
 	embed := &discordgo.MessageEmbed{
-		Title: self.Username,
-		Color: discordBlurple,
-		Fields: []*discordgo.MessageEmbedField{
-			{Name: "ID", Value: fmt.Sprintf("`%s`", self.ID), Inline: true},
-			{Name: "Servers", Value: fmt.Sprintf("%d", len(s.State.Guilds)), Inline: true},
-		},
+		Title:       self.Username,
+		Description: strings.TrimRight(desc.String(), "\n"),
+		Color:       discordBlurple,
 	}
 	if self.Avatar != "" {
 		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
 			URL: fmt.Sprintf("https://cdn.discordapp.com/avatars/%s/%s.png", self.ID, self.Avatar),
 		}
-	}
-	if env := os.Getenv("RAILWAY_ENVIRONMENT_NAME"); env != "" {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name: "Environment", Value: fmt.Sprintf("`%s`", env), Inline: true,
-		})
-	}
-	if region := os.Getenv("RAILWAY_REPLICA_REGION"); region != "" {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name: "Region", Value: fmt.Sprintf("`%s`", region), Inline: true,
-		})
-	}
-	if svc := os.Getenv("RAILWAY_SERVICE_NAME"); svc != "" {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name: "Service", Value: fmt.Sprintf("`%s`", svc), Inline: true,
-		})
 	}
 
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -134,14 +187,4 @@ func respondError(s *discordgo.Session, i *discordgo.InteractionCreate, msg stri
 	}); err != nil {
 		log.Printf("[info] failed to send error response: %v", err)
 	}
-}
-
-func (m *Module) OnLoad(_ *discordgo.Session) error {
-	log.Println("[info] module loaded")
-	return nil
-}
-
-func (m *Module) OnUnload(_ *discordgo.Session) error {
-	log.Println("[info] module unloaded")
-	return nil
 }

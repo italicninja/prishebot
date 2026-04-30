@@ -20,6 +20,10 @@ import (
 	"github.com/user/discord-bot-skeleton/web"
 )
 
+// startTime is captured at process start so "online since" reflects actual
+// startup rather than the moment b.Start() opens the WebSocket.
+var startTime = time.Now()
+
 func main() {
 	cfg := config.Load()
 
@@ -48,7 +52,7 @@ func main() {
 	if err := b.LoadModule(ping.New()); err != nil {
 		log.Fatalf("failed to load ping module: %v", err)
 	}
-	if err := b.LoadModule(info.New()); err != nil {
+	if err := b.LoadModule(info.New(cfg.ClientID, startTime)); err != nil {
 		log.Fatalf("failed to load info module: %v", err)
 	}
 	if err := b.LoadModule(birthday.New(cfg.BirthdayDataFile)); err != nil {
