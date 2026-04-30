@@ -24,21 +24,57 @@
     {{ end }}
     <div>
       <div class="guild-name">Raid Calendar</div>
-      <div class="guild-sub">All raids for {{ .Guild.Name }}, newest first</div>
+      <div class="guild-sub">Click a day to schedule a raid · Raids post directly to Discord</div>
     </div>
   </div>
 
+  {{ if .Created }}
+  <div class="banner banner-success">Raid created and posted to Discord.</div>
+  {{ end }}
+  {{ if .ErrMsg }}
+  <div class="banner banner-error">
+    {{ if eq .ErrMsg "title_required" }}Title is required.
+    {{ else if eq .ErrMsg "channel_required" }}Please select a channel.
+    {{ else if eq .ErrMsg "post_failed" }}Could not post to Discord — make sure Prishe has permission to send messages in that channel.
+    {{ else }}Something went wrong. Please try again.
+    {{ end }}
+  </div>
+  {{ end }}
+
+  <!-- ── Calendar widget ──────────────────────────────────────────────────── -->
+  <div class="cal-wrap">
+    <div class="cal-header">
+      <span class="cal-title" id="cal-label"></span>
+      <div class="cal-nav">
+        <button class="cal-nav-btn" onclick="calPrev()" aria-label="Previous month">&#8592;</button>
+        <button class="cal-nav-btn" onclick="calToday()" title="Today" style="font-size:0.7rem;width:auto;padding:0 0.5rem;">Today</button>
+        <button class="cal-nav-btn" onclick="calNext()" aria-label="Next month">&#8594;</button>
+      </div>
+    </div>
+    <div class="cal-grid" id="cal-grid">
+      <!-- Days-of-week header (rendered once) -->
+      <div class="cal-dow">Sun</div>
+      <div class="cal-dow">Mon</div>
+      <div class="cal-dow">Tue</div>
+      <div class="cal-dow">Wed</div>
+      <div class="cal-dow">Thu</div>
+      <div class="cal-dow">Fri</div>
+      <div class="cal-dow">Sat</div>
+    </div>
+  </div>
+
+  <!-- ── Raid list ────────────────────────────────────────────────────────── -->
   {{ if not .Raids }}
   <div class="empty">
     <div class="empty-icon">⚔️</div>
     <h2>No raids yet</h2>
-    <p>Use <code>/raid create</code> in Discord to post a sign-up.</p>
+    <p>Click any day on the calendar above{{ if .Guild.BotPresent }} to create one{{ else }} — add Prishe to the server first{{ end }}.</p>
   </div>
   {{ else }}
+  <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.75rem;">All raids</div>
   <div class="raid-list">
     {{ range .Raids }}
-    <div class="raid-card">
-
+    <div class="raid-card" id="raid-{{ .ID }}">
       <div class="raid-card-head">
         <span class="raid-title">{{ .Title }}</span>
         {{ if .DateStr }}<span class="raid-date">{{ .DateStr }}</span>{{ end }}
@@ -47,7 +83,7 @@
         {{ else }}
           <span class="badge badge-green">Open</span>
         {{ end }}
-        <span style="margin-left:auto;font-size:0.72rem;color:var(--muted);font-family:ui-monospace,monospace;">{{ .ID }}</span>
+        <span style="margin-left:auto;font-size:0.7rem;color:var(--muted);font-family:ui-monospace,monospace;">{{ .ID }}</span>
       </div>
 
       <div class="raid-roster">
@@ -64,9 +100,7 @@
             {{ range .Accepted }}
             <div class="roster-member">
               <span class="roster-num">{{ .Number }}</span>
-              {{ if .JobIconURL }}
-                <img class="roster-job" src="{{ .JobIconURL }}" alt="{{ .JobName }}" title="{{ .JobName }}">
-              {{ end }}
+              {{ if .JobIconURL }}<img class="roster-job" src="{{ .JobIconURL }}" alt="{{ .JobName }}" title="{{ .JobName }}">{{ end }}
               <span class="roster-name" title="{{ .DisplayName }}">{{ .DisplayName }}</span>
               {{ if .Late }}<span class="roster-tag">Late</span>{{ end }}
             </div>
@@ -74,7 +108,7 @@
           {{ end }}
         </div>
 
-        <!-- Maybe (bench + tentative) -->
+        <!-- Maybe -->
         <div class="roster-col">
           <div class="roster-col-head">
             Maybe
@@ -86,9 +120,7 @@
             {{ range .Maybe }}
             <div class="roster-member">
               <span class="roster-num">{{ .Number }}</span>
-              {{ if .JobIconURL }}
-                <img class="roster-job" src="{{ .JobIconURL }}" alt="{{ .JobName }}" title="{{ .JobName }}">
-              {{ end }}
+              {{ if .JobIconURL }}<img class="roster-job" src="{{ .JobIconURL }}" alt="{{ .JobName }}" title="{{ .JobName }}">{{ end }}
               <span class="roster-name" title="{{ .DisplayName }}">{{ .DisplayName }}</span>
               <span class="roster-tag">{{ .Status }}</span>
             </div>
@@ -96,7 +128,7 @@
           {{ end }}
         </div>
 
-        <!-- Declined (absence) -->
+        <!-- Declined -->
         <div class="roster-col">
           <div class="roster-col-head">
             Declined
@@ -108,16 +140,14 @@
             {{ range .Declined }}
             <div class="roster-member">
               <span class="roster-num">{{ .Number }}</span>
-              {{ if .JobIconURL }}
-                <img class="roster-job" src="{{ .JobIconURL }}" alt="{{ .JobName }}" title="{{ .JobName }}">
-              {{ end }}
+              {{ if .JobIconURL }}<img class="roster-job" src="{{ .JobIconURL }}" alt="{{ .JobName }}" title="{{ .JobName }}">{{ end }}
               <span class="roster-name" title="{{ .DisplayName }}">{{ .DisplayName }}</span>
             </div>
             {{ end }}
           {{ end }}
         </div>
 
-      </div><!-- .raid-roster -->
+      </div>
 
       {{ if not .Closed }}
       <div class="raid-card-foot">
@@ -127,12 +157,176 @@
         </form>
       </div>
       {{ end }}
-
-    </div><!-- .raid-card -->
+    </div>
     {{ end }}
-  </div><!-- .raid-list -->
+  </div>
   {{ end }}
 </div>
+
+<!-- ── Create-raid modal ─────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="create-modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()" aria-label="Close">&times;</button>
+    <div class="modal-title">Schedule a Raid</div>
+
+    {{ if not .Guild.BotPresent }}
+    <p style="color:var(--muted);font-size:0.875rem;">Prishe isn't in this server yet. Add her first to create raids.</p>
+    {{ else if not .Channels }}
+    <p style="color:var(--muted);font-size:0.875rem;">No text channels found. Make sure Prishe has access to at least one channel.</p>
+    {{ else }}
+    <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/raids/create">
+
+      <div class="form-field">
+        <label for="raid-title">Title</label>
+        <input type="text" name="title" id="raid-title" class="form-input"
+               placeholder="e.g. Eden's Promise E12S" maxlength="100" required>
+      </div>
+
+      <div class="form-field">
+        <label for="raid-desc">Description <span class="label-hint">(optional)</span></label>
+        <textarea name="description" id="raid-desc" class="form-textarea" rows="2"
+                  placeholder="Any extra details for your raiders…" maxlength="300"></textarea>
+      </div>
+
+      <div class="form-field">
+        <label for="raid-dt">Date &amp; time <span class="label-hint">(UTC)</span></label>
+        <input type="datetime-local" name="datetime" id="raid-dt" class="form-input">
+      </div>
+
+      <div class="form-field">
+        <label for="raid-channel">Post to channel</label>
+        <select name="channel_id" id="raid-channel" class="form-select" required>
+          <option value="">— select a channel —</option>
+          {{ range .Channels }}
+          <option value="{{ .ID }}">#{{ .Name }}</option>
+          {{ end }}
+        </select>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Create &amp; Post</button>
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      </div>
+
+    </form>
+    {{ end }}
+  </div>
+</div>
+
+<script>
+// ── Raid data for calendar ──────────────────────────────────────────────────
+var RAIDS = {{ .RaidsJSON }};
+var botPresent = {{ .Guild.BotPresent }};
+
+// ── Calendar state ──────────────────────────────────────────────────────────
+var calYear  = new Date().getFullYear();
+var calMonth = new Date().getMonth(); // 0-indexed
+var MONTHS   = ['January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+
+function buildRaidMap() {
+  var m = {};
+  RAIDS.forEach(function(r) {
+    if (!r.unixTime) return;
+    var d = new Date(r.unixTime * 1000);
+    var key = d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate();
+    if (!m[key]) m[key] = [];
+    m[key].push(r);
+  });
+  return m;
+}
+
+function renderCalendar() {
+  document.getElementById('cal-label').textContent = MONTHS[calMonth] + ' ' + calYear;
+
+  var raidMap  = buildRaidMap();
+  var today    = new Date();
+  var todayKey = today.getFullYear() + '-' + today.getMonth() + '-' + today.getDate();
+
+  var firstDow    = new Date(calYear, calMonth, 1).getDay(); // 0=Sun
+  var daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+
+  // Remove old day cells (keep the 7 DOW header cells)
+  var grid = document.getElementById('cal-grid');
+  while (grid.children.length > 7) grid.removeChild(grid.lastChild);
+
+  function pad(n) { return n < 10 ? '0' + n : n; }
+
+  // Leading empty cells
+  for (var e = 0; e < firstDow; e++) {
+    var empty = document.createElement('div');
+    empty.className = 'cal-cell cal-empty';
+    grid.appendChild(empty);
+  }
+
+  // Day cells
+  for (var d = 1; d <= daysInMonth; d++) {
+    var cell = document.createElement('div');
+    var key  = calYear + '-' + calMonth + '-' + d;
+    var raids = raidMap[key] || [];
+
+    cell.className = 'cal-cell' + (key === todayKey ? ' cal-today' : '');
+
+    var numEl = document.createElement('div');
+    numEl.className = 'cal-day-num';
+    numEl.textContent = d;
+    cell.appendChild(numEl);
+
+    if (raids.length > 0) {
+      var chips = document.createElement('div');
+      chips.className = 'cal-chips';
+      raids.forEach(function(r) {
+        var chip = document.createElement('span');
+        chip.className = 'cal-chip ' + (r.closed ? 'cal-chip-closed' : 'cal-chip-open');
+        chip.textContent = r.title;
+        chip.title = r.title;
+        chip.onclick = function(ev) {
+          ev.stopPropagation();
+          var el = document.getElementById('raid-' + r.id);
+          if (el) el.scrollIntoView({behavior:'smooth', block:'center'});
+        };
+        chips.appendChild(chip);
+      });
+      cell.appendChild(chips);
+    }
+
+    // Click empty area of cell → open create modal for that day
+    (function(year, month, day) {
+      cell.addEventListener('click', function(ev) {
+        if (ev.target.classList.contains('cal-chip')) return;
+        openModal(year, month, day);
+      });
+    })(calYear, calMonth, d);
+
+    grid.appendChild(cell);
+  }
+}
+
+function calPrev()  { calMonth--; if (calMonth < 0)  { calMonth = 11; calYear--; } renderCalendar(); }
+function calNext()  { calMonth++; if (calMonth > 11) { calMonth = 0;  calYear++; } renderCalendar(); }
+function calToday() { calYear = new Date().getFullYear(); calMonth = new Date().getMonth(); renderCalendar(); }
+
+// ── Modal ───────────────────────────────────────────────────────────────────
+function openModal(year, month, day) {
+  if (!botPresent) return;
+  var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
+  var dt  = year + '-' + pad(month + 1) + '-' + pad(day) + 'T20:00';
+  var inp = document.getElementById('raid-dt');
+  if (inp) inp.value = dt;
+  document.getElementById('create-modal').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('create-modal').classList.remove('open');
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeModal();
+});
+
+// ── Init ────────────────────────────────────────────────────────────────────
+renderCalendar();
+</script>
 
 {{ template "theme-js" . }}
 </body>

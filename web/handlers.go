@@ -4,11 +4,14 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gin-gonic/gin"
@@ -503,6 +506,12 @@ func (s *Server) handleUpdateBirthdaySettings(c *gin.Context) {
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?saved=1")
 }
 
+// ChannelOption is a text channel shown in the create-raid channel picker.
+type ChannelOption struct {
+	ID   string
+	Name string
+}
+
 // handleRaidsPage renders the raid calendar page for a guild.
 func (s *Server) handleRaidsPage(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
@@ -523,10 +532,39 @@ func (s *Server) handleRaidsPage(c *gin.Context) {
 		}
 	}
 
+	// Compact JSON used by the calendar JS to place raid chips on dates.
+	type calRaid struct {
+		ID       string `json:"id"`
+		Title    string `json:"title"`
+		UnixTime int64  `json:"unixTime"`
+		Closed   bool   `json:"closed"`
+	}
+	calRaids := make([]calRaid, len(raids))
+	for i, r := range raids {
+		calRaids[i] = calRaid{ID: r.ID, Title: r.Title, UnixTime: r.UnixTime, Closed: r.Closed}
+	}
+	raidsJSON, _ := json.Marshal(calRaids)
+
+	// Fetch text channels for the create-raid channel picker.
+	var channels []ChannelOption
+	if guild.BotPresent {
+		if gchans, err := s.bot.Session().GuildChannels(guildID); err == nil {
+			for _, ch := range gchans {
+				if ch.Type == discordgo.ChannelTypeGuildText {
+					channels = append(channels, ChannelOption{ID: ch.ID, Name: ch.Name})
+				}
+			}
+		}
+	}
+
 	if err := s.tmpl.ExecuteTemplate(c.Writer, "raids.html", gin.H{
-		"User":  sess,
-		"Guild": &guild,
-		"Raids": raids,
+		"User":      sess,
+		"Guild":     &guild,
+		"Raids":     raids,
+		"RaidsJSON": template.JS(raidsJSON),
+		"Channels":  channels,
+		"Created":   c.Query("created") == "1",
+		"ErrMsg":    c.Query("error"),
 	}); err != nil {
 		log.Printf("[web] raids template error: %v", err)
 		c.Status(http.StatusInternalServerError)
@@ -551,6 +589,50 @@ func (s *Server) handleCloseRaidWeb(c *gin.Context) {
 	}
 
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids")
+}
+
+// handleCreateRaidWeb creates a raid from the web dashboard and posts its embed
+// to the chosen Discord channel.
+func (s *Server) handleCreateRaidWeb(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	if findGuild(sess.Guilds, guildID) == nil {
+		c.String(http.StatusForbidden, "Access denied.")
+		return
+	}
+
+	title := strings.TrimSpace(c.PostForm("title"))
+	if title == "" {
+		c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids?error=title_required")
+		return
+	}
+	description := strings.TrimSpace(c.PostForm("description"))
+	channelID := strings.TrimSpace(c.PostForm("channel_id"))
+	if channelID == "" {
+		c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids?error=channel_required")
+		return
+	}
+
+	// datetime-local value: "2026-04-30T20:00" — treat as UTC.
+	var unixTime int64
+	if dt := strings.TrimSpace(c.PostForm("datetime")); dt != "" {
+		if t, err := time.Parse("2006-01-02T15:04", dt); err == nil {
+			unixTime = t.Unix()
+		}
+	}
+
+	if mod, ok := s.bot.Modules()["raid"]; ok {
+		if rm, ok := mod.(*raid.Module); ok {
+			if err := rm.CreateRaidFromWeb(s.bot.Session(), guildID, channelID, title, description, unixTime); err != nil {
+				log.Printf("[web] CreateRaidFromWeb: %v", err)
+				c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids?error=post_failed")
+				return
+			}
+		}
+	}
+
+	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids?created=1")
 }
 
 func roleColorHex(c int) string {

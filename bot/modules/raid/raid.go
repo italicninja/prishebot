@@ -1369,6 +1369,38 @@ func buildRaidView(r *Raid) RaidView {
 	return v
 }
 
+// CreateRaidFromWeb posts a new raid embed to a Discord channel and persists it.
+// This is the web-dashboard equivalent of the /raid create slash command.
+func (m *Module) CreateRaidFromWeb(s *discordgo.Session, guildID, channelID, title, description string, unixTime int64) error {
+	id := newID()
+	r := &Raid{
+		ID:          id,
+		GuildID:     guildID,
+		ChannelID:   channelID,
+		Title:       title,
+		Description: description,
+		UnixTime:    unixTime,
+		Slots:       newSlots(),
+	}
+
+	msg, err := s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+		Embeds:     []*discordgo.MessageEmbed{m.buildEmbed(r)},
+		Components: m.buildComponents(r),
+	})
+	if err != nil {
+		return fmt.Errorf("could not post raid embed to channel: %w", err)
+	}
+	r.MessageID = msg.ID
+
+	m.mu.Lock()
+	m.raids[id] = r
+	m.mu.Unlock()
+	m.save()
+
+	log.Printf("[raid] created raid %s (%s) via web dashboard in guild %s", id, title, guildID)
+	return nil
+}
+
 func buildMemberView(displayName, jobKey string, number int, late bool, status string) RaidMember {
 	mem := RaidMember{Number: number, DisplayName: displayName, Job: jobKey, Late: late, Status: status}
 	if jobKey != "" {
