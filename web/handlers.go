@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -129,6 +130,9 @@ func (s *Server) handleDashboard(c *gin.Context) {
 		guilds[i] = g
 		guilds[i].BotPresent = botSet[g.ID]
 	}
+	sort.SliceStable(guilds, func(i, j int) bool {
+		return guilds[i].BotPresent && !guilds[j].BotPresent
+	})
 	if err := s.tmpl.ExecuteTemplate(c.Writer, "dashboard.html", gin.H{
 		"User":   sess,
 		"Guilds": guilds,
