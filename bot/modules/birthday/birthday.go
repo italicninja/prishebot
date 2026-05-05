@@ -1,6 +1,7 @@
 // Package birthday wishes users a happy birthday with a random GIF fetched
 // from Tenor using the built-in public key — no configuration required.
-// Admins can customise the GIF search query per guild via the web dashboard.
+// Birthdays are stored globally per user; announcements fire per-server in
+// whichever channel the admin has configured via the web dashboard.
 package birthday
 
 import (
@@ -20,30 +21,41 @@ import (
 )
 
 const (
-	// tenorAPIKey is Tenor's public example key — no sign-up required.
-	tenorAPIKey = "LIVDSRZULELA"
-	// defaultGIFQuery is used when a guild hasn't set a custom query.
+	tenorAPIKey     = "LIVDSRZULELA"
 	defaultGIFQuery = "anime happy birthday"
 )
 
-// entry holds one user's birthday and the channel where it should be announced.
+// entry holds one user's birthday. LastWished is keyed by guildID so the same
+// birthday can be celebrated independently in every server the user shares with
+// the bot, without re-firing on the same day.
 type entry struct {
+	Month      int               `json:"month"`
+	Day        int               `json:"day"`
+	LastWished map[string]string `json:"last_wished"` // guildID → "2006-01-02"
+}
+
+// guildConfig stores per-guild settings: the channel to post announcements in
+// and an optional custom GIF search query.
+type guildConfig struct {
+	ChannelID string `json:"channel_id"`
+	GIFQuery  string `json:"gif_query"`
+}
+
+// legacyEntry is the v1/v2 on-disk entry shape, used only during migration.
+type legacyEntry struct {
 	Month      int    `json:"month"`
 	Day        int    `json:"day"`
 	ChannelID  string `json:"channel_id"`
-	LastWished string `json:"last_wished"` // "2006-01-02" — prevents re-sending on restart
+	LastWished string `json:"last_wished"`
 }
 
-// guildConfig stores per-guild settings for the birthday module.
-type guildConfig struct {
-	GIFQuery string `json:"gif_query"`
-}
-
-// persistedData is the on-disk format (v2).
-// v1 was a flat map[string]entry; load() migrates it automatically.
+// persistedData is the v3 on-disk format.
+// v1 was a flat map[string]entry keyed by "guildID:userID".
+// v2 had an "entries" map still keyed by "guildID:userID".
+// load() auto-migrates v1 and v2 to v3.
 type persistedData struct {
-	Entries map[string]entry       `json:"entries"`
-	Configs map[string]guildConfig `json:"guild_configs"`
+	Entries map[string]entry       `json:"entries"`      // key: userID (global)
+	Configs map[string]guildConfig `json:"guild_configs"` // key: guildID
 }
 
 // Module implements bot.Module for birthday tracking.
@@ -51,7 +63,7 @@ type Module struct {
 	dataFile   string
 	httpClient *http.Client
 	mu         sync.Mutex
-	entries    map[string]entry       // key: "guildID:userID"
+	entries    map[string]entry       // key: userID
 	configs    map[string]guildConfig // key: guildID
 	stop       chan struct{}
 }
@@ -152,9 +164,12 @@ func (m *Module) handleSet(s *discordgo.Session, i *discordgo.InteractionCreate,
 		return
 	}
 
-	key := i.GuildID + ":" + i.Member.User.ID
+	userID := i.Member.User.ID
 	m.mu.Lock()
-	m.entries[key] = entry{Month: month, Day: day, ChannelID: i.ChannelID}
+	e := m.entries[userID]
+	e.Month = month
+	e.Day = day
+	m.entries[userID] = e
 	m.mu.Unlock()
 	m.save()
 
@@ -162,9 +177,9 @@ func (m *Module) handleSet(s *discordgo.Session, i *discordgo.InteractionCreate,
 }
 
 func (m *Module) handleCheck(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	key := i.GuildID + ":" + i.Member.User.ID
+	userID := i.Member.User.ID
 	m.mu.Lock()
-	e, ok := m.entries[key]
+	e, ok := m.entries[userID]
 	m.mu.Unlock()
 
 	if !ok {
@@ -175,10 +190,10 @@ func (m *Module) handleCheck(s *discordgo.Session, i *discordgo.InteractionCreat
 }
 
 func (m *Module) handleRemove(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	key := i.GuildID + ":" + i.Member.User.ID
+	userID := i.Member.User.ID
 	m.mu.Lock()
-	_, ok := m.entries[key]
-	delete(m.entries, key)
+	_, ok := m.entries[userID]
+	delete(m.entries, userID)
 	m.mu.Unlock()
 
 	if !ok {
@@ -222,55 +237,74 @@ func (m *Module) checkBirthdays(s *discordgo.Session) {
 	today := time.Now().UTC()
 	dateStr := today.Format("2006-01-02")
 
-	type wish struct {
-		key       string
+	// Snapshot today's birthday users and the guilds with configured channels.
+	type birthdayUser struct {
+		userID string
+		e      entry
+	}
+	type guildTarget struct {
 		guildID   string
-		userID    string
 		channelID string
+		gifQuery  string
 	}
 
 	m.mu.Lock()
-	var wishes []wish
-	for key, e := range m.entries {
-		if e.Month != int(today.Month()) || e.Day != today.Day() || e.LastWished == dateStr {
-			continue
+	var users []birthdayUser
+	for userID, e := range m.entries {
+		if e.Month == int(today.Month()) && e.Day == today.Day() {
+			users = append(users, birthdayUser{userID, e})
 		}
-		parts := strings.SplitN(key, ":", 2)
-		if len(parts) != 2 {
-			continue
+	}
+	var targets []guildTarget
+	for guildID, cfg := range m.configs {
+		if cfg.ChannelID != "" {
+			targets = append(targets, guildTarget{guildID, cfg.ChannelID, m.gifQuery(guildID)})
 		}
-		wishes = append(wishes, wish{key: key, guildID: parts[0], userID: parts[1], channelID: e.ChannelID})
 	}
 	m.mu.Unlock()
 
-	for _, w := range wishes {
-		m.mu.Lock()
-		query := m.gifQuery(w.guildID)
-		m.mu.Unlock()
+	for _, u := range users {
+		for _, t := range targets {
+			// Skip if already wished in this guild today.
+			m.mu.Lock()
+			alreadyWished := m.entries[u.userID].LastWished[t.guildID] == dateStr
+			m.mu.Unlock()
+			if alreadyWished {
+				continue
+			}
 
-		gifURL := m.fetchGIF(query) // HTTP call — intentionally outside the mutex
+			// Only announce if the user is actually a member of this guild.
+			if _, err := s.GuildMember(t.guildID, u.userID); err != nil {
+				continue
+			}
 
-		embed := &discordgo.MessageEmbed{
-			Description: fmt.Sprintf("🎉 Happy Birthday <@%s>! Wishing you an amazing day! 🎂🥳", w.userID),
-			Color:       0xff69b4,
-		}
-		if gifURL != "" {
-			embed.Image = &discordgo.MessageEmbedImage{URL: gifURL}
-		}
+			gifURL := m.fetchGIF(t.gifQuery)
 
-		if _, err := s.ChannelMessageSendEmbed(w.channelID, embed); err != nil {
-			log.Printf("[birthday] failed to send birthday message to channel %s: %v", w.channelID, err)
-			continue
-		}
+			embed := &discordgo.MessageEmbed{
+				Description: fmt.Sprintf("🎉 Happy Birthday <@%s>! Wishing you an amazing day! 🎂🥳", u.userID),
+				Color:       0xff69b4,
+			}
+			if gifURL != "" {
+				embed.Image = &discordgo.MessageEmbedImage{URL: gifURL}
+			}
 
-		// Persist immediately so a restart doesn't re-send the same birthday.
-		m.mu.Lock()
-		if e, ok := m.entries[w.key]; ok {
-			e.LastWished = dateStr
-			m.entries[w.key] = e
-			m.saveUnlocked()
+			if _, err := s.ChannelMessageSendEmbed(t.channelID, embed); err != nil {
+				log.Printf("[birthday] failed to send to channel %s: %v", t.channelID, err)
+				continue
+			}
+
+			// Mark as wished for this guild immediately so a restart won't re-send.
+			m.mu.Lock()
+			if e, ok := m.entries[u.userID]; ok {
+				if e.LastWished == nil {
+					e.LastWished = make(map[string]string)
+				}
+				e.LastWished[t.guildID] = dateStr
+				m.entries[u.userID] = e
+				m.saveUnlocked()
+			}
+			m.mu.Unlock()
 		}
-		m.mu.Unlock()
 	}
 }
 
@@ -309,25 +343,22 @@ func (m *Module) fetchGIF(query string) string {
 
 // ── Public API for the web layer ──────────────────────────────────────────────
 
-// GuildEntry is one user's birthday, exposed to the web layer.
-type GuildEntry struct {
+// Entry is one user's birthday, exposed to the web layer.
+type Entry struct {
 	UserID string
 	Month  int
 	Day    int
 }
 
-// GuildEntries returns all registered birthdays for a guild, sorted by month then day.
-func (m *Module) GuildEntries(guildID string) []GuildEntry {
-	prefix := guildID + ":"
+// AllEntries returns every registered birthday, sorted by month then day.
+// The caller is responsible for filtering by guild membership if needed.
+func (m *Module) AllEntries() []Entry {
 	m.mu.Lock()
-	var out []GuildEntry
-	for key, e := range m.entries {
-		if userID, ok := strings.CutPrefix(key, prefix); ok {
-			out = append(out, GuildEntry{UserID: userID, Month: e.Month, Day: e.Day})
-		}
+	out := make([]Entry, 0, len(m.entries))
+	for userID, e := range m.entries {
+		out = append(out, Entry{UserID: userID, Month: e.Month, Day: e.Day})
 	}
 	m.mu.Unlock()
-	// Sort by month then day so the list reads like a calendar.
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Month != out[j].Month {
 			return out[i].Month < out[j].Month
@@ -335,6 +366,25 @@ func (m *Module) GuildEntries(guildID string) []GuildEntry {
 		return out[i].Day < out[j].Day
 	})
 	return out
+}
+
+// AnnouncementChannel returns the configured announcement channel for a guild,
+// or an empty string if none has been set.
+func (m *Module) AnnouncementChannel(guildID string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.configs[guildID].ChannelID
+}
+
+// SetAnnouncementChannel stores (or clears, if channelID is empty) the
+// announcement channel for a guild.
+func (m *Module) SetAnnouncementChannel(guildID, channelID string) {
+	m.mu.Lock()
+	cfg := m.configs[guildID]
+	cfg.ChannelID = channelID
+	m.configs[guildID] = cfg
+	m.mu.Unlock()
+	m.save()
 }
 
 // GIFQuery returns the configured search query for a guild, or the default.
@@ -354,12 +404,11 @@ func (m *Module) SetGIFQuery(guildID, query string) {
 	m.save()
 }
 
-// DefaultGIFQuery returns the built-in default query string, used as placeholder text.
+// DefaultGIFQuery returns the built-in default query string.
 func DefaultGIFQuery() string { return defaultGIFQuery }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// gifQuery returns the effective GIF query for a guild. Must hold m.mu.
 func (m *Module) gifQuery(guildID string) string {
 	if cfg, ok := m.configs[guildID]; ok && cfg.GIFQuery != "" {
 		return cfg.GIFQuery
@@ -400,24 +449,80 @@ func (m *Module) load() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Try new format first (has an "entries" key at the top level).
+	// v3: entries keyed by plain userID (no ":" in any key).
 	var pd persistedData
 	if json.Unmarshal(raw, &pd) == nil && pd.Entries != nil {
-		m.entries = pd.Entries
-		if pd.Configs != nil {
-			m.configs = pd.Configs
+		isV3 := true
+		for key := range pd.Entries {
+			if strings.Contains(key, ":") {
+				isV3 = false
+				break
+			}
 		}
+		if isV3 {
+			m.entries = pd.Entries
+			if pd.Configs != nil {
+				m.configs = pd.Configs
+			}
+			return
+		}
+	}
+
+	// v2 / v1: entries keyed by "guildID:userID" with a string last_wished and
+	// an optional channel_id per entry. We migrate to v3: deduplicate by userID
+	// (first entry wins) and promote any channel_id to the guild's config.
+	type legacyData struct {
+		Entries map[string]legacyEntry `json:"entries"`
+		Configs map[string]guildConfig `json:"guild_configs"`
+	}
+
+	var legacy legacyData
+	// v2 has a top-level "entries" key; try that first.
+	if json.Unmarshal(raw, &legacy) == nil && legacy.Entries != nil {
+		m.migrateFromLegacy(legacy.Entries, legacy.Configs)
 		return
 	}
 
-	// Fall back to v1 flat format: map["guildID:userID"]entry.
-	var old map[string]entry
-	if err := json.Unmarshal(raw, &old); err != nil {
+	// v1 is a bare flat map.
+	var flat map[string]legacyEntry
+	if err := json.Unmarshal(raw, &flat); err != nil {
 		log.Printf("[birthday] parse %s error: %v", m.dataFile, err)
 		return
 	}
-	m.entries = old
-	log.Printf("[birthday] migrated %d birthday entries from v1 format", len(old))
+	m.migrateFromLegacy(flat, nil)
+}
+
+// migrateFromLegacy converts v1/v2 entries (keyed "guildID:userID") to v3.
+// Must hold m.mu.
+func (m *Module) migrateFromLegacy(entries map[string]legacyEntry, configs map[string]guildConfig) {
+	for key, e := range entries {
+		guildID, userID, ok := strings.Cut(key, ":")
+		if !ok {
+			continue
+		}
+		if _, exists := m.entries[userID]; !exists {
+			m.entries[userID] = entry{Month: e.Month, Day: e.Day}
+		}
+		// Promote the entry's channel_id to the guild config if not already set.
+		if e.ChannelID != "" {
+			cfg := m.configs[guildID]
+			if cfg.ChannelID == "" {
+				cfg.ChannelID = e.ChannelID
+				m.configs[guildID] = cfg
+			}
+		}
+	}
+	for guildID, cfg := range configs {
+		existing := m.configs[guildID]
+		if existing.GIFQuery == "" {
+			existing.GIFQuery = cfg.GIFQuery
+		}
+		if existing.ChannelID == "" {
+			existing.ChannelID = cfg.ChannelID
+		}
+		m.configs[guildID] = existing
+	}
+	log.Printf("[birthday] migrated %d birthday entries to v3 format", len(m.entries))
 }
 
 func ephemeralRespond(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {

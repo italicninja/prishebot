@@ -62,6 +62,20 @@
 
   <div class="card">
     <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/birthday">
+
+      <div class="form-field">
+        <label for="channel_id">Announcement channel</label>
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:0.5rem;">
+          Prishe will post birthday messages here. Leave blank to disable announcements.
+        </p>
+        <select name="channel_id" id="channel_id" class="form-select">
+          <option value="">— disabled —</option>
+          {{ range .Channels }}
+          <option value="{{ .ID }}"{{ if eq .ID $.AnnouncementChannelID }} selected{{ end }}>#{{ .Name }}</option>
+          {{ end }}
+        </select>
+      </div>
+
       <div class="form-field">
         <label for="gif_query">GIF search query</label>
         <p style="font-size:0.8rem;color:var(--muted);margin-bottom:0.5rem;">

@@ -458,7 +458,7 @@ func randomState() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// handleBirthdaySettingsPage renders the birthday GIF query config page.
+// handleBirthdaySettingsPage renders the birthday settings page.
 func (s *Server) handleBirthdaySettingsPage(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
@@ -472,47 +472,65 @@ func (s *Server) handleBirthdaySettingsPage(c *gin.Context) {
 	guild.BotPresent = s.botGuildSet()[guildID]
 
 	currentQuery := birthday.DefaultGIFQuery()
+	var announcementChannelID string
+
 	type BirthdayRow struct {
 		UserID    string
 		Username  string
 		AvatarURL string
-		Date      string // "January 2"
+		Date      string
 	}
 	var birthdayRows []BirthdayRow
 
 	if mod, ok := s.bot.Modules()["birthday"]; ok {
 		if bm, ok := mod.(*birthday.Module); ok {
 			currentQuery = bm.GIFQuery(guildID)
-			for _, e := range bm.GuildEntries(guildID) {
-				row := BirthdayRow{
-					UserID: e.UserID,
-					Date:   fmt.Sprintf("%s %d", time.Month(e.Month), e.Day),
+			announcementChannelID = bm.AnnouncementChannel(guildID)
+			// Filter global entries to members of this guild only.
+			for _, e := range bm.AllEntries() {
+				mem, err := s.bot.Session().GuildMember(guildID, e.UserID)
+				if err != nil {
+					continue // not a member of this guild
 				}
-				if m, err := s.bot.Session().GuildMember(guildID, e.UserID); err == nil {
-					row.Username = m.DisplayName()
-					row.AvatarURL = memberAvatarURL(guildID, m)
-				} else {
-					row.Username = "Unknown User"
+				row := BirthdayRow{
+					UserID:    e.UserID,
+					Username:  mem.DisplayName(),
+					AvatarURL: memberAvatarURL(guildID, mem),
+					Date:      fmt.Sprintf("%s %d", time.Month(e.Month), e.Day),
 				}
 				birthdayRows = append(birthdayRows, row)
 			}
 		}
 	}
 
+	// Fetch text channels for the announcement channel picker.
+	var channels []ChannelOption
+	if guild.BotPresent {
+		if gchans, err := s.bot.Session().GuildChannels(guildID); err == nil {
+			for _, ch := range gchans {
+				if ch.Type == discordgo.ChannelTypeGuildText {
+					channels = append(channels, ChannelOption{ID: ch.ID, Name: ch.Name})
+				}
+			}
+		}
+	}
+
 	if err := s.tmpl.ExecuteTemplate(c.Writer, "birthday-settings.html", gin.H{
-		"User":          sess,
-		"Guild":         &guild,
-		"CurrentQuery":  currentQuery,
-		"DefaultQuery":  birthday.DefaultGIFQuery(),
-		"Saved":         c.Query("saved") == "1",
-		"BirthdayRows":  birthdayRows,
+		"User":                  sess,
+		"Guild":                 &guild,
+		"CurrentQuery":          currentQuery,
+		"DefaultQuery":          birthday.DefaultGIFQuery(),
+		"Saved":                 c.Query("saved") == "1",
+		"BirthdayRows":          birthdayRows,
+		"Channels":              channels,
+		"AnnouncementChannelID": announcementChannelID,
 	}); err != nil {
 		log.Printf("[web] birthday-settings template error: %v", err)
 		c.Status(http.StatusInternalServerError)
 	}
 }
 
-// handleUpdateBirthdaySettings saves the per-guild GIF query.
+// handleUpdateBirthdaySettings saves the per-guild GIF query and announcement channel.
 func (s *Server) handleUpdateBirthdaySettings(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
@@ -522,10 +540,10 @@ func (s *Server) handleUpdateBirthdaySettings(c *gin.Context) {
 		return
 	}
 
-	query := strings.TrimSpace(c.PostForm("gif_query"))
 	if mod, ok := s.bot.Modules()["birthday"]; ok {
 		if bm, ok := mod.(*birthday.Module); ok {
-			bm.SetGIFQuery(guildID, query)
+			bm.SetGIFQuery(guildID, strings.TrimSpace(c.PostForm("gif_query")))
+			bm.SetAnnouncementChannel(guildID, strings.TrimSpace(c.PostForm("channel_id")))
 		}
 	}
 
