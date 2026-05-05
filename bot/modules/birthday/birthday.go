@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -307,6 +308,34 @@ func (m *Module) fetchGIF(query string) string {
 }
 
 // ── Public API for the web layer ──────────────────────────────────────────────
+
+// GuildEntry is one user's birthday, exposed to the web layer.
+type GuildEntry struct {
+	UserID string
+	Month  int
+	Day    int
+}
+
+// GuildEntries returns all registered birthdays for a guild, sorted by month then day.
+func (m *Module) GuildEntries(guildID string) []GuildEntry {
+	prefix := guildID + ":"
+	m.mu.Lock()
+	var out []GuildEntry
+	for key, e := range m.entries {
+		if userID, ok := strings.CutPrefix(key, prefix); ok {
+			out = append(out, GuildEntry{UserID: userID, Month: e.Month, Day: e.Day})
+		}
+	}
+	m.mu.Unlock()
+	// Sort by month then day so the list reads like a calendar.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Month != out[j].Month {
+			return out[i].Month < out[j].Month
+		}
+		return out[i].Day < out[j].Day
+	})
+	return out
+}
 
 // GIFQuery returns the configured search query for a guild, or the default.
 func (m *Module) GIFQuery(guildID string) string {

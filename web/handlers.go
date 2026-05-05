@@ -472,18 +472,40 @@ func (s *Server) handleBirthdaySettingsPage(c *gin.Context) {
 	guild.BotPresent = s.botGuildSet()[guildID]
 
 	currentQuery := birthday.DefaultGIFQuery()
+	type BirthdayRow struct {
+		UserID    string
+		Username  string
+		AvatarURL string
+		Date      string // "January 2"
+	}
+	var birthdayRows []BirthdayRow
+
 	if mod, ok := s.bot.Modules()["birthday"]; ok {
 		if bm, ok := mod.(*birthday.Module); ok {
 			currentQuery = bm.GIFQuery(guildID)
+			for _, e := range bm.GuildEntries(guildID) {
+				row := BirthdayRow{
+					UserID: e.UserID,
+					Date:   fmt.Sprintf("%s %d", time.Month(e.Month), e.Day),
+				}
+				if m, err := s.bot.Session().GuildMember(guildID, e.UserID); err == nil {
+					row.Username = m.DisplayName()
+					row.AvatarURL = memberAvatarURL(guildID, m)
+				} else {
+					row.Username = "Unknown User"
+				}
+				birthdayRows = append(birthdayRows, row)
+			}
 		}
 	}
 
 	if err := s.tmpl.ExecuteTemplate(c.Writer, "birthday-settings.html", gin.H{
-		"User":         sess,
-		"Guild":        &guild,
-		"CurrentQuery": currentQuery,
-		"DefaultQuery": birthday.DefaultGIFQuery(),
-		"Saved":        c.Query("saved") == "1",
+		"User":          sess,
+		"Guild":         &guild,
+		"CurrentQuery":  currentQuery,
+		"DefaultQuery":  birthday.DefaultGIFQuery(),
+		"Saved":         c.Query("saved") == "1",
+		"BirthdayRows":  birthdayRows,
 	}); err != nil {
 		log.Printf("[web] birthday-settings template error: %v", err)
 		c.Status(http.StatusInternalServerError)
@@ -637,6 +659,27 @@ func (s *Server) handleCreateRaidWeb(c *gin.Context) {
 	}
 
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids?created=1")
+}
+
+// memberAvatarURL returns the best available avatar URL for a guild member.
+// Prefers the guild-specific avatar, falls back to the global user avatar,
+// and returns an empty string if neither is set.
+func memberAvatarURL(guildID string, m *discordgo.Member) string {
+	if m.Avatar != "" {
+		ext := "png"
+		if strings.HasPrefix(m.Avatar, "a_") {
+			ext = "gif"
+		}
+		return fmt.Sprintf("https://cdn.discordapp.com/guilds/%s/users/%s/avatars/%s.%s?size=64", guildID, m.User.ID, m.Avatar, ext)
+	}
+	if m.User != nil && m.User.Avatar != "" {
+		ext := "png"
+		if strings.HasPrefix(m.User.Avatar, "a_") {
+			ext = "gif"
+		}
+		return fmt.Sprintf("https://cdn.discordapp.com/avatars/%s/%s.%s?size=64", m.User.ID, m.User.Avatar, ext)
+	}
+	return ""
 }
 
 func roleColorHex(c int) string {

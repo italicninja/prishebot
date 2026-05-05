@@ -32,6 +32,34 @@
   <div class="banner banner-success">Settings saved.</div>
   {{ end }}
 
+  <section style="margin-bottom:2rem;">
+    <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.75rem;">Registered birthdays</div>
+
+    {{ if not .BirthdayRows }}
+    <div class="empty" style="padding:2.5rem 1rem;">
+      <div class="empty-icon">🎂</div>
+      <h2>No birthdays yet</h2>
+      <p>Users can register with <code>/birthday set</code>.</p>
+    </div>
+    {{ else }}
+    <div class="roles-list">
+      {{ range .BirthdayRows }}
+      <div class="role-row">
+        {{ if .AvatarURL }}
+          <img src="{{ .AvatarURL }}" alt="{{ .Username }}" class="avatar" style="width:36px;height:36px;">
+        {{ else }}
+          <div class="server-icon-ph" style="width:36px;height:36px;font-size:0.85rem;flex-shrink:0;">{{ slice .Username 0 1 }}</div>
+        {{ end }}
+        <div class="role-info">
+          <strong>{{ .Username }}</strong>
+        </div>
+        <span class="badge badge-muted" style="margin-left:auto;">{{ .Date }}</span>
+      </div>
+      {{ end }}
+    </div>
+    {{ end }}
+  </section>
+
   <div class="card">
     <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/birthday">
       <div class="form-field">
