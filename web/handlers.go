@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -471,8 +474,8 @@ func (s *Server) handleBirthdaySettingsPage(c *gin.Context) {
 	guild := *src
 	guild.BotPresent = s.botGuildSet()[guildID]
 
-	currentQuery := birthday.DefaultGIFQuery()
 	var announcementChannelID string
+	gifsEnabled := true
 
 	type BirthdayRow struct {
 		UserID    string
@@ -482,23 +485,42 @@ func (s *Server) handleBirthdaySettingsPage(c *gin.Context) {
 	}
 	var birthdayRows []BirthdayRow
 
+	type GIFItem struct {
+		Filename string
+		URL      string
+	}
+	var gifItems []GIFItem
+
 	if mod, ok := s.bot.Modules()["birthday"]; ok {
 		if bm, ok := mod.(*birthday.Module); ok {
-			currentQuery = bm.GIFQuery(guildID)
 			announcementChannelID = bm.AnnouncementChannel(guildID)
+			gifsEnabled = bm.GIFsEnabled(guildID)
+
+			// Collect GIFs from the guild's library.
+			gifDir := bm.GuildGIFsDir(guildID)
+			if des, err := os.ReadDir(gifDir); err == nil {
+				for _, de := range des {
+					if !de.IsDir() && strings.HasSuffix(strings.ToLower(de.Name()), ".gif") {
+						gifItems = append(gifItems, GIFItem{
+							Filename: de.Name(),
+							URL:      "/gifs/" + guildID + "/" + de.Name(),
+						})
+					}
+				}
+			}
+
 			// Filter global entries to members of this guild only.
 			for _, e := range bm.AllEntries() {
 				mem, err := s.bot.Session().GuildMember(guildID, e.UserID)
 				if err != nil {
-					continue // not a member of this guild
+					continue
 				}
-				row := BirthdayRow{
+				birthdayRows = append(birthdayRows, BirthdayRow{
 					UserID:    e.UserID,
 					Username:  mem.DisplayName(),
 					AvatarURL: memberAvatarURL(guildID, mem),
 					Date:      fmt.Sprintf("%s %d", time.Month(e.Month), e.Day),
-				}
-				birthdayRows = append(birthdayRows, row)
+				})
 			}
 		}
 	}
@@ -515,22 +537,33 @@ func (s *Server) handleBirthdaySettingsPage(c *gin.Context) {
 		}
 	}
 
+	errMsg := ""
+	switch c.Query("error") {
+	case "notgif":
+		errMsg = "Only .gif files are accepted."
+	case "toobig":
+		errMsg = "File must be under 8 MB."
+	case "invalid":
+		errMsg = "The file doesn't appear to be a valid GIF."
+	}
+
 	if err := s.tmpl.ExecuteTemplate(c.Writer, "birthday-settings.html", gin.H{
 		"User":                  sess,
 		"Guild":                 &guild,
-		"CurrentQuery":          currentQuery,
-		"DefaultQuery":          birthday.DefaultGIFQuery(),
 		"Saved":                 c.Query("saved") == "1",
+		"Error":                 errMsg,
 		"BirthdayRows":          birthdayRows,
 		"Channels":              channels,
 		"AnnouncementChannelID": announcementChannelID,
+		"GIFsEnabled":           gifsEnabled,
+		"GIFItems":              gifItems,
 	}); err != nil {
 		log.Printf("[web] birthday-settings template error: %v", err)
 		c.Status(http.StatusInternalServerError)
 	}
 }
 
-// handleUpdateBirthdaySettings saves the per-guild GIF query and announcement channel.
+// handleUpdateBirthdaySettings saves the announcement channel and GIF toggle.
 func (s *Server) handleUpdateBirthdaySettings(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
@@ -542,12 +575,108 @@ func (s *Server) handleUpdateBirthdaySettings(c *gin.Context) {
 
 	if mod, ok := s.bot.Modules()["birthday"]; ok {
 		if bm, ok := mod.(*birthday.Module); ok {
-			bm.SetGIFQuery(guildID, strings.TrimSpace(c.PostForm("gif_query")))
 			bm.SetAnnouncementChannel(guildID, strings.TrimSpace(c.PostForm("channel_id")))
+			bm.SetGIFsEnabled(guildID, c.PostForm("gifs_enabled") == "1")
 		}
 	}
 
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?saved=1")
+}
+
+// handleUploadGIF accepts a multipart GIF upload and stores it in the guild's library.
+func (s *Server) handleUploadGIF(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	if findGuild(sess.Guilds, guildID) == nil {
+		c.String(http.StatusForbidden, "Access denied.")
+		return
+	}
+
+	file, err := c.FormFile("gif")
+	if err != nil {
+		c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?error=notgif")
+		return
+	}
+
+	if !strings.HasSuffix(strings.ToLower(file.Filename), ".gif") {
+		c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?error=notgif")
+		return
+	}
+
+	const maxSize = 8 << 20 // 8 MB
+	if file.Size > maxSize {
+		c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?error=toobig")
+		return
+	}
+
+	// Validate GIF magic bytes.
+	f, err := file.Open()
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to open upload.")
+		return
+	}
+	header := make([]byte, 6)
+	_, err = io.ReadFull(f, header)
+	f.Close()
+	if err != nil || (string(header) != "GIF89a" && string(header) != "GIF87a") {
+		c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?error=invalid")
+		return
+	}
+
+	safeName := sanitizeGIFFilename(file.Filename)
+	dir := filepath.Join(s.cfg.GIFsDir, guildID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		c.String(http.StatusInternalServerError, "Failed to create directory.")
+		return
+	}
+
+	if err := c.SaveUploadedFile(file, filepath.Join(dir, safeName)); err != nil {
+		c.String(http.StatusInternalServerError, "Failed to save file.")
+		return
+	}
+
+	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?saved=1")
+}
+
+// handleDeleteGIF removes a GIF from the guild's library.
+func (s *Server) handleDeleteGIF(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	if findGuild(sess.Guilds, guildID) == nil {
+		c.String(http.StatusForbidden, "Access denied.")
+		return
+	}
+
+	safeName := filepath.Base(c.Param("filename"))
+	if !strings.HasSuffix(strings.ToLower(safeName), ".gif") {
+		c.String(http.StatusBadRequest, "Invalid filename.")
+		return
+	}
+
+	_ = os.Remove(filepath.Join(s.cfg.GIFsDir, guildID, safeName))
+	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?saved=1")
+}
+
+// sanitizeGIFFilename strips unsafe characters from an uploaded filename.
+func sanitizeGIFFilename(name string) string {
+	base := filepath.Base(name)
+	var b strings.Builder
+	for _, r := range base {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	s := b.String()
+	if !strings.HasSuffix(strings.ToLower(s), ".gif") {
+		s += ".gif"
+	}
+	return s
 }
 
 // ChannelOption is a text channel shown in the create-raid channel picker.

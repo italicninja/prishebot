@@ -55,7 +55,7 @@ func main() {
 	if err := b.LoadModule(info.New(cfg.ClientID, startTime)); err != nil {
 		log.Fatalf("failed to load info module: %v", err)
 	}
-	if err := b.LoadModule(birthday.New(cfg.BirthdayDataFile)); err != nil {
+	if err := b.LoadModule(birthday.New(cfg.BirthdayDataFile, cfg.GIFsDir, cfg.BaseURL)); err != nil {
 		log.Fatalf("failed to load birthday module: %v", err)
 	}
 	if err := b.LoadModule(roles.New(cfg.RolesDataFile)); err != nil {

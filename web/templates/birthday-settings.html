@@ -24,14 +24,18 @@
     {{ end }}
     <div>
       <div class="guild-name">Birthday Settings</div>
-      <div class="guild-sub">Configure the GIF Prishe sends on birthdays</div>
+      <div class="guild-sub">Configure birthday announcements and GIFs for {{ .Guild.Name }}</div>
     </div>
   </div>
 
   {{ if .Saved }}
   <div class="banner banner-success">Settings saved.</div>
   {{ end }}
+  {{ if .Error }}
+  <div class="banner banner-error">{{ .Error }}</div>
+  {{ end }}
 
+  <!-- Registered birthdays -->
   <section style="margin-bottom:2rem;">
     <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.75rem;">Registered birthdays</div>
 
@@ -60,7 +64,8 @@
     {{ end }}
   </section>
 
-  <div class="card">
+  <!-- Announcement settings -->
+  <div class="card" style="margin-bottom:1.5rem;">
     <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/birthday">
 
       <div class="form-field">
@@ -77,16 +82,17 @@
       </div>
 
       <div class="form-field">
-        <label for="gif_query">GIF search query</label>
-        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:0.5rem;">
-          Sent to Tenor when Prishe picks a birthday GIF. Try <code>anime birthday cake</code>,
-          <code>celebration confetti</code>, or a character name.
-        </p>
-        <input type="text" name="gif_query" id="gif_query" class="form-input"
-               value="{{ .CurrentQuery }}"
-               placeholder="{{ .DefaultQuery }}" maxlength="100">
-        <p style="font-size:0.78rem;color:var(--muted);margin-top:0.4rem;">
-          Leave blank to restore the default: <code>{{ .DefaultQuery }}</code>
+        <label style="display:flex;align-items:center;gap:0.75rem;cursor:pointer;">
+          <label class="toggle">
+            <input type="checkbox" name="gifs_enabled" value="1"{{ if .GIFsEnabled }} checked{{ end }}
+                   onchange="this.form.querySelector('[name=gifs_enabled_hidden]').disabled=this.checked">
+            <span class="toggle-slider"></span>
+          </label>
+          <input type="hidden" name="gifs_enabled" value="0">
+          Send a GIF with birthday messages
+        </label>
+        <p style="font-size:0.8rem;color:var(--muted);margin-top:0.4rem;">
+          When enabled, a random GIF from this server's library is attached to each birthday message.
         </p>
       </div>
 
@@ -96,7 +102,64 @@
       </div>
     </form>
   </div>
+
+  <!-- GIF library -->
+  <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.75rem;">GIF library</div>
+
+  {{ if .GIFItems }}
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:0.75rem;margin-bottom:1.25rem;">
+    {{ range .GIFItems }}
+    <div style="position:relative;border-radius:8px;overflow:hidden;background:var(--surface2);aspect-ratio:1;">
+      <img src="{{ .URL }}" alt="{{ .Filename }}" style="width:100%;height:100%;object-fit:cover;">
+      <form method="POST" action="/dashboard/server/{{ $.Guild.ID }}/birthday/gifs/{{ .Filename }}/delete"
+            style="position:absolute;top:4px;right:4px;">
+        <button type="submit" class="btn btn-sm"
+                style="padding:2px 6px;background:rgba(0,0,0,.6);border:none;color:#fff;font-size:0.7rem;border-radius:4px;"
+                title="Delete {{ .Filename }}">✕</button>
+      </form>
+      <div style="position:absolute;bottom:0;left:0;right:0;padding:4px 6px;background:rgba(0,0,0,.55);font-size:0.65rem;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        {{ .Filename }}
+      </div>
+    </div>
+    {{ end }}
+  </div>
+  {{ else }}
+  <div class="empty" style="padding:2rem 1rem;margin-bottom:1.25rem;">
+    <div class="empty-icon">🖼️</div>
+    <h2>No GIFs yet</h2>
+    <p>Upload .gif files below — Prishe will pick one at random on each birthday.</p>
+  </div>
+  {{ end }}
+
+  <!-- Upload form -->
+  <div class="card">
+    <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/birthday/gifs" enctype="multipart/form-data">
+      <div class="form-field">
+        <label for="gif">Upload a GIF</label>
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:0.5rem;">
+          .gif files only · max 8 MB
+        </p>
+        <input type="file" name="gif" id="gif" accept=".gif,image/gif" class="form-input" required>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Upload</button>
+      </div>
+    </form>
+  </div>
 </div>
+
+<script>
+// Keep only the checkbox value submitted — the hidden fallback fires when unchecked.
+document.querySelectorAll('input[type=checkbox][name=gifs_enabled]').forEach(function(cb) {
+  cb.addEventListener('change', function() {
+    var hidden = this.form.querySelector('input[type=hidden][name=gifs_enabled]');
+    if (hidden) hidden.disabled = this.checked;
+  });
+  // Sync on load.
+  var hidden = cb.form.querySelector('input[type=hidden][name=gifs_enabled]');
+  if (hidden) hidden.disabled = cb.checked;
+});
+</script>
 
 {{ template "theme-js" . }}
 </body>

@@ -76,6 +76,11 @@ func (s *Server) routes() *gin.Engine {
 		r.Static("/icons", s.cfg.IconsDir)
 	}
 
+	// Serve per-server birthday GIFs so Discord can load them in embeds.
+	if s.cfg.GIFsDir != "" {
+		r.Static("/gifs", s.cfg.GIFsDir)
+	}
+
 	// ── Health ──────────────────────────────────────────────────────────────
 	// Railway (and any load balancer) polls this path. It must respond 200
 	// immediately — do not gate it behind module load or Discord connectivity.
@@ -102,6 +107,8 @@ func (s *Server) routes() *gin.Engine {
 		dash.POST("/server/:id/roles/:roleID/delete", s.handleDeleteRole)
 		dash.GET("/server/:id/birthday", s.handleBirthdaySettingsPage)
 		dash.POST("/server/:id/birthday", s.handleUpdateBirthdaySettings)
+		dash.POST("/server/:id/birthday/gifs", s.handleUploadGIF)
+		dash.POST("/server/:id/birthday/gifs/:filename/delete", s.handleDeleteGIF)
 		dash.GET("/server/:id/raids", s.handleRaidsPage)
 		dash.POST("/server/:id/raids/create", s.handleCreateRaidWeb)
 		dash.POST("/server/:id/raids/:raidID/close", s.handleCloseRaidWeb)

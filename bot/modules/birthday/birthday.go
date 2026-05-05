@@ -1,7 +1,7 @@
-// Package birthday wishes users a happy birthday with a random GIF fetched
-// from Tenor using the built-in public key — no configuration required.
+// Package birthday wishes users a happy birthday with a random GIF chosen from
+// the per-server GIF library uploaded via the web dashboard.
 // Birthdays are stored globally per user; announcements fire per-server in
-// whichever channel the admin has configured via the web dashboard.
+// whichever channel the admin has configured.
 package birthday
 
 import (
@@ -9,20 +9,14 @@ import (
 	"fmt"
 	"log"
 	"math/rand/v2"
-	"net/http"
-	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-)
-
-const (
-	tenorAPIKey     = "LIVDSRZULELA"
-	defaultGIFQuery = "anime happy birthday"
 )
 
 // entry holds one user's birthday. LastWished is keyed by guildID so the same
@@ -34,11 +28,10 @@ type entry struct {
 	LastWished map[string]string `json:"last_wished"` // guildID → "2006-01-02"
 }
 
-// guildConfig stores per-guild settings: the channel to post announcements in
-// and an optional custom GIF search query.
+// guildConfig stores per-guild settings.
 type guildConfig struct {
-	ChannelID string `json:"channel_id"`
-	GIFQuery  string `json:"gif_query"`
+	ChannelID   string `json:"channel_id"`
+	DisableGIFs bool   `json:"disable_gifs,omitempty"`
 }
 
 // legacyEntry is the v1/v2 on-disk entry shape, used only during migration.
@@ -50,36 +43,35 @@ type legacyEntry struct {
 }
 
 // persistedData is the v3 on-disk format.
-// v1 was a flat map[string]entry keyed by "guildID:userID".
-// v2 had an "entries" map still keyed by "guildID:userID".
-// load() auto-migrates v1 and v2 to v3.
 type persistedData struct {
-	Entries map[string]entry       `json:"entries"`      // key: userID (global)
+	Entries map[string]entry       `json:"entries"`       // key: userID (global)
 	Configs map[string]guildConfig `json:"guild_configs"` // key: guildID
 }
 
 // Module implements bot.Module for birthday tracking.
 type Module struct {
-	dataFile   string
-	httpClient *http.Client
-	mu         sync.Mutex
-	entries    map[string]entry       // key: userID
-	configs    map[string]guildConfig // key: guildID
-	stop       chan struct{}
+	dataFile string
+	gifsDir  string
+	baseURL  string
+	mu       sync.Mutex
+	entries  map[string]entry       // key: userID
+	configs  map[string]guildConfig // key: guildID
+	stop     chan struct{}
 }
 
-func New(dataFile string) *Module {
+func New(dataFile, gifsDir, baseURL string) *Module {
 	return &Module{
-		dataFile:   dataFile,
-		httpClient: &http.Client{Timeout: 5 * time.Second},
-		entries:    make(map[string]entry),
-		configs:    make(map[string]guildConfig),
-		stop:       make(chan struct{}),
+		dataFile: dataFile,
+		gifsDir:  gifsDir,
+		baseURL:  strings.TrimRight(baseURL, "/"),
+		entries:  make(map[string]entry),
+		configs:  make(map[string]guildConfig),
+		stop:     make(chan struct{}),
 	}
 }
 
 func (m *Module) Name() string        { return "birthday" }
-func (m *Module) Description() string { return "Remembers birthdays and wishes users on their special day with an anime GIF." }
+func (m *Module) Description() string { return "Remembers birthdays and wishes users on their special day with a GIF." }
 
 func (m *Module) Commands() []*discordgo.ApplicationCommand {
 	minMonth, maxMonth := 1.0, 12.0
@@ -237,7 +229,6 @@ func (m *Module) checkBirthdays(s *discordgo.Session) {
 	today := time.Now().UTC()
 	dateStr := today.Format("2006-01-02")
 
-	// Snapshot today's birthday users and the guilds with configured channels.
 	type birthdayUser struct {
 		userID string
 		e      entry
@@ -245,7 +236,6 @@ func (m *Module) checkBirthdays(s *discordgo.Session) {
 	type guildTarget struct {
 		guildID   string
 		channelID string
-		gifQuery  string
 	}
 
 	m.mu.Lock()
@@ -258,7 +248,7 @@ func (m *Module) checkBirthdays(s *discordgo.Session) {
 	var targets []guildTarget
 	for guildID, cfg := range m.configs {
 		if cfg.ChannelID != "" {
-			targets = append(targets, guildTarget{guildID, cfg.ChannelID, m.gifQuery(guildID)})
+			targets = append(targets, guildTarget{guildID, cfg.ChannelID})
 		}
 	}
 	m.mu.Unlock()
@@ -278,7 +268,7 @@ func (m *Module) checkBirthdays(s *discordgo.Session) {
 				continue
 			}
 
-			gifURL := m.fetchGIF(t.gifQuery)
+			gifURL := m.pickGIF(t.guildID)
 
 			embed := &discordgo.MessageEmbed{
 				Description: fmt.Sprintf("🎉 Happy Birthday <@%s>! Wishing you an amazing day! 🎂🥳", u.userID),
@@ -308,37 +298,38 @@ func (m *Module) checkBirthdays(s *discordgo.Session) {
 	}
 }
 
-// fetchGIF returns a random GIF URL from Tenor for the given query.
-func (m *Module) fetchGIF(query string) string {
-	apiURL := fmt.Sprintf(
-		"https://tenor.googleapis.com/v2/search?q=%s&key=%s&limit=20&media_filter=gif&random=true",
-		url.QueryEscape(query),
-		tenorAPIKey,
-	)
-	resp, err := m.httpClient.Get(apiURL)
+// pickGIF returns a URL to a randomly chosen GIF from the guild's local library.
+// Returns "" if GIFs are disabled, the library is empty, or no baseURL is set.
+func (m *Module) pickGIF(guildID string) string {
+	if m.baseURL == "" || m.gifsDir == "" {
+		return ""
+	}
+
+	m.mu.Lock()
+	disabled := m.configs[guildID].DisableGIFs
+	m.mu.Unlock()
+	if disabled {
+		return ""
+	}
+
+	dir := filepath.Join(m.gifsDir, guildID)
+	des, err := os.ReadDir(dir)
 	if err != nil {
-		log.Printf("[birthday] tenor API error: %v", err)
-		return ""
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Results []struct {
-			MediaFormats map[string]struct {
-				URL string `json:"url"`
-			} `json:"media_formats"`
-		} `json:"results"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || len(result.Results) == 0 {
-		log.Printf("[birthday] tenor parse error or empty results: %v", err)
 		return ""
 	}
 
-	item := result.Results[rand.IntN(len(result.Results))]
-	if gif, ok := item.MediaFormats["gif"]; ok {
-		return gif.URL
+	var names []string
+	for _, de := range des {
+		if !de.IsDir() && strings.HasSuffix(strings.ToLower(de.Name()), ".gif") {
+			names = append(names, de.Name())
+		}
 	}
-	return ""
+	if len(names) == 0 {
+		return ""
+	}
+
+	name := names[rand.IntN(len(names))]
+	return m.baseURL + "/gifs/" + guildID + "/" + name
 }
 
 // ── Public API for the web layer ──────────────────────────────────────────────
@@ -351,7 +342,6 @@ type Entry struct {
 }
 
 // AllEntries returns every registered birthday, sorted by month then day.
-// The caller is responsible for filtering by guild membership if needed.
 func (m *Module) AllEntries() []Entry {
 	m.mu.Lock()
 	out := make([]Entry, 0, len(m.entries))
@@ -368,16 +358,14 @@ func (m *Module) AllEntries() []Entry {
 	return out
 }
 
-// AnnouncementChannel returns the configured announcement channel for a guild,
-// or an empty string if none has been set.
+// AnnouncementChannel returns the configured announcement channel for a guild.
 func (m *Module) AnnouncementChannel(guildID string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.configs[guildID].ChannelID
 }
 
-// SetAnnouncementChannel stores (or clears, if channelID is empty) the
-// announcement channel for a guild.
+// SetAnnouncementChannel stores (or clears) the announcement channel for a guild.
 func (m *Module) SetAnnouncementChannel(guildID, channelID string) {
 	m.mu.Lock()
 	cfg := m.configs[guildID]
@@ -387,33 +375,26 @@ func (m *Module) SetAnnouncementChannel(guildID, channelID string) {
 	m.save()
 }
 
-// GIFQuery returns the configured search query for a guild, or the default.
-func (m *Module) GIFQuery(guildID string) string {
+// GIFsEnabled reports whether GIFs are enabled for the guild (default: true).
+func (m *Module) GIFsEnabled(guildID string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.gifQuery(guildID)
+	return !m.configs[guildID].DisableGIFs
 }
 
-// SetGIFQuery stores a custom GIF search query for a guild.
-func (m *Module) SetGIFQuery(guildID, query string) {
+// SetGIFsEnabled enables or disables GIF sending for a guild.
+func (m *Module) SetGIFsEnabled(guildID string, enabled bool) {
 	m.mu.Lock()
 	cfg := m.configs[guildID]
-	cfg.GIFQuery = strings.TrimSpace(query)
+	cfg.DisableGIFs = !enabled
 	m.configs[guildID] = cfg
 	m.mu.Unlock()
 	m.save()
 }
 
-// DefaultGIFQuery returns the built-in default query string.
-func DefaultGIFQuery() string { return defaultGIFQuery }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-func (m *Module) gifQuery(guildID string) string {
-	if cfg, ok := m.configs[guildID]; ok && cfg.GIFQuery != "" {
-		return cfg.GIFQuery
-	}
-	return defaultGIFQuery
+// GuildGIFsDir returns the filesystem path where this guild's GIFs are stored.
+func (m *Module) GuildGIFsDir(guildID string) string {
+	return filepath.Join(m.gifsDir, guildID)
 }
 
 // ── Persistence ───────────────────────────────────────────────────────────────
@@ -468,22 +449,18 @@ func (m *Module) load() {
 		}
 	}
 
-	// v2 / v1: entries keyed by "guildID:userID" with a string last_wished and
-	// an optional channel_id per entry. We migrate to v3: deduplicate by userID
-	// (first entry wins) and promote any channel_id to the guild's config.
+	// v2 / v1 migration: entries keyed by "guildID:userID".
 	type legacyData struct {
 		Entries map[string]legacyEntry `json:"entries"`
 		Configs map[string]guildConfig `json:"guild_configs"`
 	}
 
 	var legacy legacyData
-	// v2 has a top-level "entries" key; try that first.
 	if json.Unmarshal(raw, &legacy) == nil && legacy.Entries != nil {
 		m.migrateFromLegacy(legacy.Entries, legacy.Configs)
 		return
 	}
 
-	// v1 is a bare flat map.
 	var flat map[string]legacyEntry
 	if err := json.Unmarshal(raw, &flat); err != nil {
 		log.Printf("[birthday] parse %s error: %v", m.dataFile, err)
@@ -492,8 +469,6 @@ func (m *Module) load() {
 	m.migrateFromLegacy(flat, nil)
 }
 
-// migrateFromLegacy converts v1/v2 entries (keyed "guildID:userID") to v3.
-// Must hold m.mu.
 func (m *Module) migrateFromLegacy(entries map[string]legacyEntry, configs map[string]guildConfig) {
 	for key, e := range entries {
 		guildID, userID, ok := strings.Cut(key, ":")
@@ -503,7 +478,6 @@ func (m *Module) migrateFromLegacy(entries map[string]legacyEntry, configs map[s
 		if _, exists := m.entries[userID]; !exists {
 			m.entries[userID] = entry{Month: e.Month, Day: e.Day}
 		}
-		// Promote the entry's channel_id to the guild config if not already set.
 		if e.ChannelID != "" {
 			cfg := m.configs[guildID]
 			if cfg.ChannelID == "" {
@@ -514,9 +488,6 @@ func (m *Module) migrateFromLegacy(entries map[string]legacyEntry, configs map[s
 	}
 	for guildID, cfg := range configs {
 		existing := m.configs[guildID]
-		if existing.GIFQuery == "" {
-			existing.GIFQuery = cfg.GIFQuery
-		}
 		if existing.ChannelID == "" {
 			existing.ChannelID = cfg.ChannelID
 		}

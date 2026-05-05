@@ -20,6 +20,7 @@ type Config struct {
 	Port          string // HTTP server port
 	SecretKey     string // Used to sign session cookies
 	SecureCookies bool   // Set true in production (requires HTTPS)
+	GIFsDir          string // Directory where per-server birthday GIFs are stored (default: gifs)
 	BirthdayDataFile string // Path to birthday persistence file (default: birthdays.json)
 	RolesDataFile    string // Path to roles persistence file (default: roles.json)
 	RaidDataFile     string // Path to raid sign-up persistence file (default: raids.json)
@@ -48,6 +49,7 @@ func Load() *Config {
 		Port:          getOrDefault("PORT", "8080"),
 		SecretKey:     loadSecretKey(),
 		SecureCookies: os.Getenv("SECURE_COOKIES") == "true",
+		GIFsDir:          getOrDefault("GIFS_DIR", "gifs"),
 		BirthdayDataFile: getOrDefault("BIRTHDAY_DATA_FILE", "birthdays.json"),
 		RolesDataFile:    getOrDefault("ROLES_DATA_FILE", "roles.json"),
 		RaidDataFile:     getOrDefault("RAID_DATA_FILE", "raids.json"),
