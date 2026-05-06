@@ -129,6 +129,12 @@ type Raid struct {
 	Closed        bool          `json:"closed"`
 }
 
+// hasStarted reports whether the scheduled event time has been reached.
+// Raids without a scheduled time never "start" by the clock.
+func (r *Raid) hasStarted() bool {
+	return r.UnixTime > 0 && time.Now().Unix() >= r.UnixTime
+}
+
 func (r *Raid) isFull() bool {
 	for _, s := range r.Slots {
 		if s.Signee == nil {
@@ -202,7 +208,15 @@ type Module struct {
 	// modified again, so they are safe to read from interaction handlers without mu.
 	roleEmoji map[string]*discordgo.ComponentEmoji // role key -> app emoji
 	jobEmoji  map[string]*discordgo.ComponentEmoji // job key -> app emoji
+
+	stopCh chan struct{}
 }
+
+// Embed colors. Red replaces the default once the scheduled start time arrives.
+const (
+	colorOpen    = 0x1E3A5F
+	colorStarted = 0xED4245
+)
 
 func New(dataFile, appID string) *Module {
 	return &Module{dataFile: dataFile, appID: appID, raids: make(map[string]*Raid)}
@@ -294,13 +308,85 @@ func (m *Module) HandleInteraction(s *discordgo.Session, i *discordgo.Interactio
 func (m *Module) OnLoad(s *discordgo.Session) error {
 	m.load()
 	m.ensureEmojis(s)
+	m.stopCh = make(chan struct{})
+	go m.watchEventTimes(s)
 	log.Println("[raid] module loaded")
 	return nil
 }
 
 func (m *Module) OnUnload(_ *discordgo.Session) error {
+	if m.stopCh != nil {
+		close(m.stopCh)
+		m.stopCh = nil
+	}
 	log.Println("[raid] module unloaded")
 	return nil
+}
+
+// watchEventTimes periodically scans persisted raids and auto-closes any whose
+// scheduled start time has been reached. Closing flips the embed to red (via
+// hasStarted in buildEmbed) and disables every sign-up button.
+func (m *Module) watchEventTimes(s *discordgo.Session) {
+	// Run an immediate sweep so raids whose time passed while the bot was offline
+	// don't have to wait a full tick to be closed.
+	m.sweepStartedRaids(s)
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.stopCh:
+			return
+		case <-ticker.C:
+			m.sweepStartedRaids(s)
+		}
+	}
+}
+
+func (m *Module) sweepStartedRaids(s *discordgo.Session) {
+	type pending struct {
+		channelID, messageID, title string
+		embed                       *discordgo.MessageEmbed
+		components                  []discordgo.MessageComponent
+	}
+	var todo []pending
+
+	m.mu.Lock()
+	for _, r := range m.raids {
+		if r.Closed || !r.hasStarted() {
+			continue
+		}
+		r.Closed = true
+		todo = append(todo, pending{
+			channelID:  r.ChannelID,
+			messageID:  r.MessageID,
+			title:      r.Title,
+			embed:      m.buildEmbed(r),
+			components: m.buildComponents(r),
+		})
+	}
+	m.mu.Unlock()
+
+	if len(todo) == 0 {
+		return
+	}
+	m.save()
+
+	for _, p := range todo {
+		if p.messageID == "" {
+			continue
+		}
+		if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel:    p.channelID,
+			ID:         p.messageID,
+			Embeds:     &[]*discordgo.MessageEmbed{p.embed},
+			Components: &p.components,
+		}); err != nil {
+			log.Printf("[raid] auto-close edit failed for %q: %v", p.title, err)
+			continue
+		}
+		log.Printf("[raid] auto-closed %q at scheduled start time", p.title)
+	}
 }
 
 // ensureEmojis uploads FF14 role and job icons as Discord application emojis
@@ -1097,10 +1183,15 @@ func (m *Module) buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 		title = "🔒 " + raid.Title
 	}
 
+	color := colorOpen
+	if raid.hasStarted() {
+		color = colorStarted
+	}
+
 	embed := &discordgo.MessageEmbed{
 		Title:       title,
 		Description: strings.Join(descLines, "\n"),
-		Color:       0x1E3A5F,
+		Color:       color,
 		Fields:      fields,
 		Footer:      &discordgo.MessageEmbedFooter{Text: "ID: " + raid.ID},
 	}
