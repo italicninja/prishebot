@@ -545,12 +545,17 @@ func (s *Server) handleBirthdaySettingsPage(c *gin.Context) {
 		errMsg = "File must be under 8 MB."
 	case "invalid":
 		errMsg = "The file doesn't appear to be a valid GIF."
+	case "wish_failed":
+		errMsg = "Failed to send the birthday wish — check the bot log. Make sure an announcement channel is configured."
+	case "birthday_unavailable":
+		errMsg = "The birthday module isn't loaded."
 	}
 
 	if err := s.tmpl.ExecuteTemplate(c.Writer, "birthday-settings.html", gin.H{
 		"User":                  sess,
 		"Guild":                 &guild,
 		"Saved":                 c.Query("saved") == "1",
+		"Wished":                c.Query("wished") == "1",
 		"Error":                 errMsg,
 		"BirthdayRows":          birthdayRows,
 		"Channels":              channels,
@@ -637,6 +642,42 @@ func (s *Server) handleUploadGIF(c *gin.Context) {
 	}
 
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?saved=1")
+}
+
+// handleSendBirthdayWish manually fires today's birthday wish for one user.
+// Useful when the auto-fire happened with no GIF (e.g. before a config fix)
+// and an admin wants to re-send it. Marks the user as wished today so the
+// daily check won't double-fire later in the day.
+func (s *Server) handleSendBirthdayWish(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	if findGuild(sess.Guilds, guildID) == nil {
+		c.String(http.StatusForbidden, "Access denied.")
+		return
+	}
+
+	userID := c.Param("userID")
+	redirect := "/dashboard/server/" + guildID + "/birthday"
+
+	mod, ok := s.bot.Modules()["birthday"]
+	if !ok {
+		c.Redirect(http.StatusFound, redirect+"?error=birthday_unavailable")
+		return
+	}
+	bm, ok := mod.(*birthday.Module)
+	if !ok {
+		c.Redirect(http.StatusFound, redirect+"?error=birthday_unavailable")
+		return
+	}
+
+	if err := bm.SendBirthdayWish(s.bot.Session(), guildID, userID); err != nil {
+		log.Printf("[web] SendBirthdayWish %s/%s: %v", guildID, userID, err)
+		c.Redirect(http.StatusFound, redirect+"?error=wish_failed")
+		return
+	}
+
+	c.Redirect(http.StatusFound, redirect+"?wished=1")
 }
 
 // handleDeleteGIF removes a GIF from the guild's library.

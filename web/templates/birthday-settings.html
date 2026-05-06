@@ -31,6 +31,9 @@
   {{ if .Saved }}
   <div class="banner banner-success">Settings saved.</div>
   {{ end }}
+  {{ if .Wished }}
+  <div class="banner banner-success">Birthday wish sent.</div>
+  {{ end }}
   {{ if .Error }}
   <div class="banner banner-error">{{ .Error }}</div>
   {{ end }}
@@ -58,6 +61,10 @@
           <strong>{{ .Username }}</strong>
         </div>
         <span class="badge badge-muted" style="margin-left:auto;">{{ .Date }}</span>
+        <form method="POST" action="/dashboard/server/{{ $.Guild.ID }}/birthday/wish/{{ .UserID }}"
+              onsubmit="return confirm('Send a birthday wish to {{ .Username }} now?')">
+          <button type="submit" class="btn btn-ghost btn-sm" title="Send a birthday message right now">🎂 Send wish</button>
+        </form>
       </div>
       {{ end }}
     </div>

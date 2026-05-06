@@ -52,18 +52,16 @@ type persistedData struct {
 type Module struct {
 	dataFile string
 	gifsDir  string
-	baseURL  string
 	mu       sync.Mutex
 	entries  map[string]entry       // key: userID
 	configs  map[string]guildConfig // key: guildID
 	stop     chan struct{}
 }
 
-func New(dataFile, gifsDir, baseURL string) *Module {
+func New(dataFile, gifsDir string) *Module {
 	return &Module{
 		dataFile: dataFile,
 		gifsDir:  gifsDir,
-		baseURL:  strings.TrimRight(baseURL, "/"),
 		entries:  make(map[string]entry),
 		configs:  make(map[string]guildConfig),
 		stop:     make(chan struct{}),
@@ -268,17 +266,7 @@ func (m *Module) checkBirthdays(s *discordgo.Session) {
 				continue
 			}
 
-			gifURL := m.pickGIF(t.guildID)
-
-			embed := &discordgo.MessageEmbed{
-				Description: fmt.Sprintf("🎉 Happy Birthday <@%s>! Wishing you an amazing day! 🎂🥳", u.userID),
-				Color:       0xff69b4,
-			}
-			if gifURL != "" {
-				embed.Image = &discordgo.MessageEmbedImage{URL: gifURL}
-			}
-
-			if _, err := s.ChannelMessageSendEmbed(t.channelID, embed); err != nil {
+			if err := m.postBirthdayMessage(s, t.guildID, t.channelID, u.userID); err != nil {
 				log.Printf("[birthday] failed to send to channel %s: %v", t.channelID, err)
 				continue
 			}
@@ -298,24 +286,97 @@ func (m *Module) checkBirthdays(s *discordgo.Session) {
 	}
 }
 
-// pickGIF returns a URL to a randomly chosen GIF from the guild's local library.
-// Returns "" if GIFs are disabled, the library is empty, or no baseURL is set.
-func (m *Module) pickGIF(guildID string) string {
-	if m.baseURL == "" || m.gifsDir == "" {
-		return ""
+// postBirthdayMessage builds and sends the happy-birthday embed to channelID,
+// attaching a random GIF from the guild's library when available.
+func (m *Module) postBirthdayMessage(s *discordgo.Session, guildID, channelID, userID string) error {
+	embed := &discordgo.MessageEmbed{
+		Description: fmt.Sprintf("🎉 Happy Birthday <@%s>! Wishing you an amazing day! 🎂🥳", userID),
+		Color:       0xff69b4,
+	}
+	send := &discordgo.MessageSend{Embeds: []*discordgo.MessageEmbed{embed}}
+
+	// Attach a random GIF as a file so it renders without depending on any
+	// public BASE_URL or the bot's web server being reachable from Discord's CDN.
+	gifPath, gifName := m.pickGIFFile(guildID)
+	var gifFile *os.File
+	if gifPath != "" {
+		if f, err := os.Open(gifPath); err == nil {
+			gifFile = f
+			embed.Image = &discordgo.MessageEmbedImage{URL: "attachment://" + gifName}
+			send.Files = []*discordgo.File{{
+				Name:        gifName,
+				ContentType: "image/gif",
+				Reader:      f,
+			}}
+		} else {
+			log.Printf("[birthday] could not open GIF %s: %v", gifPath, err)
+		}
+	}
+
+	_, err := s.ChannelMessageSendComplex(channelID, send)
+	if gifFile != nil {
+		gifFile.Close()
+	}
+	return err
+}
+
+// SendBirthdayWish posts a birthday message for userID to the guild's
+// configured announcement channel right now, regardless of the calendar date.
+// Marks the user as wished today for that guild so the daily check won't
+// double-fire on a real birthday.
+func (m *Module) SendBirthdayWish(s *discordgo.Session, guildID, userID string) error {
+	m.mu.Lock()
+	cfg, hasCfg := m.configs[guildID]
+	_, hasEntry := m.entries[userID]
+	m.mu.Unlock()
+
+	if !hasCfg || cfg.ChannelID == "" {
+		return fmt.Errorf("no announcement channel configured")
+	}
+	if !hasEntry {
+		return fmt.Errorf("user has no registered birthday")
+	}
+
+	if err := m.postBirthdayMessage(s, guildID, cfg.ChannelID, userID); err != nil {
+		return err
+	}
+
+	today := time.Now().UTC().Format("2006-01-02")
+	m.mu.Lock()
+	if e, ok := m.entries[userID]; ok {
+		if e.LastWished == nil {
+			e.LastWished = make(map[string]string)
+		}
+		e.LastWished[guildID] = today
+		m.entries[userID] = e
+		m.saveUnlocked()
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+// pickGIFFile picks a random .gif from the guild's local library.
+// Returns ("", "") if GIFs are disabled, the directory is missing, or empty.
+// Logs the reason on the empty path so operators can see why no GIF attached.
+func (m *Module) pickGIFFile(guildID string) (path, name string) {
+	if m.gifsDir == "" {
+		log.Printf("[birthday] GIFs dir not configured; skipping attachment for guild %s", guildID)
+		return "", ""
 	}
 
 	m.mu.Lock()
 	disabled := m.configs[guildID].DisableGIFs
 	m.mu.Unlock()
 	if disabled {
-		return ""
+		log.Printf("[birthday] GIFs disabled for guild %s; skipping attachment", guildID)
+		return "", ""
 	}
 
 	dir := filepath.Join(m.gifsDir, guildID)
 	des, err := os.ReadDir(dir)
 	if err != nil {
-		return ""
+		log.Printf("[birthday] no GIF library for guild %s (%s): %v", guildID, dir, err)
+		return "", ""
 	}
 
 	var names []string
@@ -325,11 +386,12 @@ func (m *Module) pickGIF(guildID string) string {
 		}
 	}
 	if len(names) == 0 {
-		return ""
+		log.Printf("[birthday] GIF library for guild %s is empty (%s)", guildID, dir)
+		return "", ""
 	}
 
-	name := names[rand.IntN(len(names))]
-	return m.baseURL + "/gifs/" + guildID + "/" + name
+	chosen := names[rand.IntN(len(names))]
+	return filepath.Join(dir, chosen), chosen
 }
 
 // ── Public API for the web layer ──────────────────────────────────────────────
