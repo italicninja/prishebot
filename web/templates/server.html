@@ -36,9 +36,10 @@
   {{ else }}
 
   <div style="display:flex;gap:0.6rem;flex-wrap:wrap;margin-bottom:1.75rem;">
-    <a href="/dashboard/server/{{ .Guild.ID }}/roles"   class="btn btn-ghost btn-sm">Self-assignable roles</a>
-    <a href="/dashboard/server/{{ .Guild.ID }}/birthday" class="btn btn-ghost btn-sm">Birthday settings</a>
-    <a href="/dashboard/server/{{ .Guild.ID }}/raids"   class="btn btn-ghost btn-sm">Raid calendar</a>
+    <a href="/dashboard/server/{{ .Guild.ID }}/roles"       class="btn btn-ghost btn-sm">Self-assignable roles</a>
+    <a href="/dashboard/server/{{ .Guild.ID }}/birthday"    class="btn btn-ghost btn-sm">Birthday settings</a>
+    <a href="/dashboard/server/{{ .Guild.ID }}/raids"       class="btn btn-ghost btn-sm">Raid calendar</a>
+    <a href="/dashboard/server/{{ .Guild.ID }}/permissions" class="btn btn-ghost btn-sm">Command permissions</a>
   </div>
 
   <div class="tabs" role="tablist">

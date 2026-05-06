@@ -3,6 +3,7 @@ package bot
 import (
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,10 @@ type Bot struct {
 	// when commands are created. We need these IDs to delete commands on unload.
 	registeredCmds map[string][]*discordgo.ApplicationCommand
 
+	// commandPerms enforces per-guild role-based access control on slash commands.
+	// All commands default to admin-only; admins use the web UI to grant roles.
+	commandPerms *CommandPermissions
+
 	startTime time.Time
 }
 
@@ -64,6 +69,7 @@ func New(cfg *config.Config) (*Bot, error) {
 		cmdOwners:      make(map[string]Module),
 		guildSettings:  make(map[string]map[string]bool),
 		registeredCmds: make(map[string][]*discordgo.ApplicationCommand),
+		commandPerms:   NewCommandPermissions(cfg.CommandPermsFile),
 	}
 
 	// Register the single interaction handler. discordgo calls this for every
@@ -137,7 +143,15 @@ func (b *Bot) LoadModule(m Module) error {
 	}
 
 	var registered []*discordgo.ApplicationCommand
+	// Every command is admin-only at the Discord level by default. Server-side
+	// enforcement in handleInteraction is still authoritative; this just hides
+	// commands from non-admins in the slash menu unless a guild admin grants
+	// access via Discord's own integrations UI.
+	adminOnly := int64(discordgo.PermissionManageGuild)
 	for _, cmd := range m.Commands() {
+		if cmd.DefaultMemberPermissions == nil {
+			cmd.DefaultMemberPermissions = &adminOnly
+		}
 		created, err := b.session.ApplicationCommandCreate(b.cfg.ClientID, "", cmd)
 		if err != nil {
 			// Roll back already-created commands before returning the error.
@@ -294,5 +308,47 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 
+	// Per-guild role-lock gate. Applies to slash command invocations only —
+	// component clicks (e.g. raid Join buttons) and autocomplete fall through
+	// so a role-locked /raid create still lets regular members sign up.
+	if i.Type == discordgo.InteractionApplicationCommand && i.GuildID != "" {
+		cmdName := i.ApplicationCommandData().Name
+		if !b.commandPerms.Allowed(i.GuildID, cmdName, i.Member) {
+			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "🔒 You don't have permission to use **/" + cmdName + "** on this server. A server admin can grant access on the dashboard.",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			}); err != nil {
+				log.Printf("[bot] failed to send permission-denied response: %v", err)
+			}
+			return
+		}
+	}
+
 	m.HandleInteraction(s, i)
+}
+
+// CommandPerms exposes the role-lock store so the web dashboard can read
+// and update per-guild allow-lists.
+func (b *Bot) CommandPerms() *CommandPermissions { return b.commandPerms }
+
+// CommandInfo describes one registered top-level slash command for the web UI.
+type CommandInfo struct {
+	Name   string
+	Module string
+}
+
+// RegisteredCommands returns every command currently registered with Discord,
+// sorted by command name. Used to render the role-lock UI.
+func (b *Bot) RegisteredCommands() []CommandInfo {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	out := make([]CommandInfo, 0, len(b.cmdOwners))
+	for name, m := range b.cmdOwners {
+		out = append(out, CommandInfo{Name: name, Module: m.Name()})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }

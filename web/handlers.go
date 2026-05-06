@@ -886,3 +886,128 @@ func buildSigs(prefix string, opts []*discordgo.ApplicationCommandOption) []stri
 	}
 	return []string{sb.String()}
 }
+
+// handlePermissionsPage renders the per-command role-lock UI for a guild.
+func (s *Server) handlePermissionsPage(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	src := findGuild(sess.Guilds, guildID)
+	if src == nil {
+		c.String(http.StatusForbidden, "You don't have admin access to that server.")
+		return
+	}
+	guild := *src
+	guild.BotPresent = s.botGuildSet()[guildID]
+
+	type RoleOption struct {
+		ID       string
+		Name     string
+		ColorHex string
+	}
+	var roleOptions []RoleOption
+	if guild.BotPresent {
+		discordRoles, err := s.bot.Session().GuildRoles(guildID)
+		if err != nil {
+			log.Printf("[web] GuildRoles %s: %v", guildID, err)
+			c.String(http.StatusInternalServerError, "Could not fetch guild roles.")
+			return
+		}
+		// Include @everyone (its role ID matches the guild ID) so admins can
+		// open a command to all members. Skip bot-managed roles — they can't
+		// be assigned to humans.
+		for _, r := range discordRoles {
+			if r.Managed {
+				continue
+			}
+			name := r.Name
+			if r.ID == guildID {
+				name = "@everyone"
+			}
+			roleOptions = append(roleOptions, RoleOption{
+				ID:       r.ID,
+				Name:     name,
+				ColorHex: roleColorHex(r.Color),
+			})
+		}
+		// @everyone first, then alphabetical.
+		sort.SliceStable(roleOptions, func(i, j int) bool {
+			if roleOptions[i].ID == guildID {
+				return true
+			}
+			if roleOptions[j].ID == guildID {
+				return false
+			}
+			return strings.ToLower(roleOptions[i].Name) < strings.ToLower(roleOptions[j].Name)
+		})
+	}
+
+	cp := s.bot.CommandPerms()
+	configured := cp.GuildSettings(guildID)
+
+	type CommandRow struct {
+		Name        string
+		Module      string
+		Selected    map[string]bool
+		AdminOnly   bool
+	}
+	var rows []CommandRow
+	for _, ci := range s.bot.RegisteredCommands() {
+		sel := make(map[string]bool, len(configured[ci.Name]))
+		for _, rid := range configured[ci.Name] {
+			sel[rid] = true
+		}
+		rows = append(rows, CommandRow{
+			Name:      ci.Name,
+			Module:    ci.Module,
+			Selected:  sel,
+			AdminOnly: len(sel) == 0,
+		})
+	}
+
+	if err := s.tmpl.ExecuteTemplate(c.Writer, "permissions.html", gin.H{
+		"User":     sess,
+		"Guild":    &guild,
+		"Commands": rows,
+		"Roles":    roleOptions,
+		"Saved":    c.Query("saved") == "1",
+		"ClientID": s.cfg.ClientID,
+	}); err != nil {
+		log.Printf("[web] permissions template error: %v", err)
+		c.Status(http.StatusInternalServerError)
+	}
+}
+
+// handleUpdatePermissions saves the per-command role-lock form.
+//
+// The form sends one checkbox per (command, role) pair, named "roles_<cmd>"
+// with value=<roleID>. Commands not present in the form are cleared (=
+// admin-only). We only iterate known commands so a malicious form can't
+// register arbitrary command names.
+func (s *Server) handleUpdatePermissions(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	if findGuild(sess.Guilds, guildID) == nil {
+		c.String(http.StatusForbidden, "Access denied.")
+		return
+	}
+
+	if err := c.Request.ParseForm(); err != nil {
+		c.String(http.StatusBadRequest, "Invalid form data.")
+		return
+	}
+
+	cp := s.bot.CommandPerms()
+	for _, ci := range s.bot.RegisteredCommands() {
+		var out []string
+		for _, id := range c.Request.PostForm["roles_"+ci.Name] {
+			if id = strings.TrimSpace(id); id != "" {
+				out = append(out, id)
+			}
+		}
+		cp.SetRoles(guildID, ci.Name, out)
+	}
+
+	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/permissions?saved=1")
+}
