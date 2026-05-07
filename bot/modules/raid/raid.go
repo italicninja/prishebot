@@ -225,7 +225,7 @@ func New(dataFile, appID string) *Module {
 
 func (m *Module) Name() string          { return "raid" }
 func (m *Module) Description() string   { return "FF14-style raid sign-ups (2T/2H/2M/1R/1C). Post a sign-up embed and let members claim slots with buttons." }
-func (m *Module) Category() bot.Category { return bot.CategoryFun }
+func (m *Module) Category() bot.Category { return bot.CategoryFunctional }
 
 func (m *Module) Commands() []*discordgo.ApplicationCommand {
 	return []*discordgo.ApplicationCommand{
