@@ -13,15 +13,16 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/user/discord-bot-skeleton/bot"
 )
 
 const discordBlurple = 0x5865F2
 
-// ModuleListing is one row in the /modules response, exposed to the bot
-// loader via a closure so this package doesn't have to import bot/.
+// ModuleListing is one row in the /modules response.
 type ModuleListing struct {
 	Name        string
 	Description string
+	Category    bot.Category
 	Commands    []string // top-level command names, with leading slash
 	Enabled     bool     // is the module enabled for the guild being queried
 }
@@ -49,6 +50,7 @@ func (m *Module) Name() string { return "info" }
 func (m *Module) Description() string {
 	return "Provides /serverinfo, /botinfo, and /modules slash commands."
 }
+func (m *Module) Category() bot.Category { return bot.CategoryFunctional }
 
 func (m *Module) Commands() []*discordgo.ApplicationCommand {
 	return []*discordgo.ApplicationCommand{
@@ -215,29 +217,53 @@ func (m *Module) modulesList(s *discordgo.Session, i *discordgo.InteractionCreat
 
 	listings := m.listModules(i.GuildID)
 
-	var fields []*discordgo.MessageEmbedField
+	// Bucket enabled modules by category; track disabled ones for the footer.
+	byCategory := make(map[bot.Category][]ModuleListing)
+	enabledCount := 0
 	var disabled []string
 	for _, ml := range listings {
 		if !ml.Enabled {
 			disabled = append(disabled, ml.Name)
 			continue
 		}
-		var lines []string
-		if ml.Description != "" {
-			lines = append(lines, ml.Description)
+		cat := ml.Category
+		if cat == "" {
+			cat = bot.CategoryFunctional
 		}
-		if len(ml.Commands) > 0 {
-			cmds := make([]string, len(ml.Commands))
-			for idx, c := range ml.Commands {
-				cmds[idx] = "`" + c + "`"
+		byCategory[cat] = append(byCategory[cat], ml)
+		enabledCount++
+	}
+
+	categoryEmoji := map[bot.Category]string{
+		bot.CategoryFunctional: "🛠️",
+		bot.CategoryFun:        "🎉",
+	}
+
+	var fields []*discordgo.MessageEmbedField
+	for _, cat := range bot.CategoryOrder {
+		mods := byCategory[cat]
+		if len(mods) == 0 {
+			continue
+		}
+		var lines []string
+		for _, ml := range mods {
+			line := "**" + ml.Name + "** — " + ml.Description
+			if len(ml.Commands) > 0 {
+				cmds := make([]string, len(ml.Commands))
+				for idx, c := range ml.Commands {
+					cmds[idx] = "`" + c + "`"
+				}
+				line += "\n" + strings.Join(cmds, " ")
 			}
-			lines = append(lines, "Commands: "+strings.Join(cmds, ", "))
-		} else {
-			lines = append(lines, "_No slash commands._")
+			lines = append(lines, line)
+		}
+		emoji := categoryEmoji[cat]
+		if emoji == "" {
+			emoji = "📦"
 		}
 		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:  "✅ " + ml.Name,
-			Value: strings.Join(lines, "\n"),
+			Name:  fmt.Sprintf("%s %s · %d", emoji, cat, len(mods)),
+			Value: strings.Join(lines, "\n\n"),
 		})
 	}
 
@@ -245,11 +271,11 @@ func (m *Module) modulesList(s *discordgo.Session, i *discordgo.InteractionCreat
 		Title: "Active modules",
 		Color: discordBlurple,
 	}
-	if len(fields) == 0 {
+	if enabledCount == 0 {
 		embed.Description = "_No modules are currently enabled in this server._"
 	} else {
 		embed.Description = fmt.Sprintf("**%d** module%s enabled in this server.",
-			len(fields), pluralS(len(fields)))
+			enabledCount, pluralS(enabledCount))
 		embed.Fields = fields
 	}
 	if len(disabled) > 0 {

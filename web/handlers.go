@@ -20,6 +20,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/gin-gonic/gin"
 
+	"github.com/user/discord-bot-skeleton/bot"
 	"github.com/user/discord-bot-skeleton/bot/modules/birthday"
 	"github.com/user/discord-bot-skeleton/bot/modules/raid"
 	"github.com/user/discord-bot-skeleton/bot/modules/roles"
@@ -186,8 +187,12 @@ func (s *Server) handleServerPage(c *gin.Context) {
 		Commands    []CommandRow
 		ChannelIDs  []string // configured per-module channel allow-list
 	}
+	type CategoryGroup struct {
+		Name    string
+		Modules []ModuleRow
+	}
 
-	var rows []ModuleRow
+	rowsByCategory := make(map[bot.Category][]ModuleRow)
 	for name, mod := range modules {
 		var cmdRows []CommandRow
 		for _, c := range mod.Commands() {
@@ -197,15 +202,29 @@ func (s *Server) handleServerPage(c *gin.Context) {
 				SelectedIDs: configured[c.Name],
 			})
 		}
-		rows = append(rows, ModuleRow{
+		row := ModuleRow{
 			Name:        name,
 			Description: mod.Description(),
 			Enabled:     settings[name],
 			Commands:    cmdRows,
 			ChannelIDs:  chp.GetModule(guildID, name),
-		})
+		}
+		cat := mod.Category()
+		if cat == "" {
+			cat = bot.CategoryFunctional
+		}
+		rowsByCategory[cat] = append(rowsByCategory[cat], row)
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
+
+	var categories []CategoryGroup
+	for _, cat := range bot.CategoryOrder {
+		mods := rowsByCategory[cat]
+		if len(mods) == 0 {
+			continue
+		}
+		sort.Slice(mods, func(i, j int) bool { return mods[i].Name < mods[j].Name })
+		categories = append(categories, CategoryGroup{Name: string(cat), Modules: mods})
+	}
 
 	// Available roles for the multi-select. Includes @everyone (its role ID
 	// equals the guild ID) so admins can open a command to all members.
@@ -272,7 +291,7 @@ func (s *Server) handleServerPage(c *gin.Context) {
 	if err := s.tmpl.ExecuteTemplate(c.Writer, "server.html", gin.H{
 		"User":           sess,
 		"Guild":          &guild,
-		"Modules":        rows,
+		"Categories":     categories,
 		"GlobalChannels": chp.GetGlobal(guildID),
 		"RolesJSON":      template.JS(rolesJSON),
 		"ChannelsJSON":   template.JS(channelsJSON),

@@ -69,69 +69,72 @@
         </div>
       </div>
 
-      <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.75rem;">Modules</div>
-
-      {{ if not .Modules }}
+      {{ if not .Categories }}
       <div class="empty" style="padding:2.5rem 1rem;">
         <div class="empty-icon">📦</div>
         <h2>No modules loaded</h2>
         <p>Add modules in <code>main.go</code> to see them here.</p>
       </div>
       {{ else }}
-      <div class="module-list">
-        {{ range .Modules }}
-        <div class="module-row">
-          <div class="module-row-head">
-            <div class="module-info">
-              <h3>{{ .Name }}</h3>
-              <p>{{ .Description }}</p>
-              {{ if .Commands }}
-              <div class="module-cmds">
-                {{ range .Commands }}{{ range .Signatures }}<code>{{ . }}</code>{{ end }}{{ end }}
-              </div>
-              {{ end }}
-            </div>
-            <label class="toggle" title="Toggle {{ .Name }}">
-              <input type="checkbox" name="module_{{ .Name }}"{{ if .Enabled }} checked{{ end }}>
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-
-          {{ if .Commands }}
-          <details class="module-perms">
-            <summary>Command permissions <span class="muted">· {{ len .Commands }}</span></summary>
-            <p class="module-perms-help">Choose which roles can run each command. Leave a command empty for admin-only. Server admins always have access.</p>
-            <div class="cmd-perms-list">
-              {{ range .Commands }}
-              <div class="cmd-perms-row">
-                <div class="cmd-perms-name"><code>/{{ .Name }}</code></div>
-                <div class="multiselect"
-                     data-name="roles_{{ .Name }}"
-                     data-source="roles"
-                     data-empty="Admin-only"
-                     data-add-label="+ Add role"
-                     data-selected="{{ range $i, $id := .SelectedIDs }}{{ if $i }},{{ end }}{{ $id }}{{ end }}">
+      {{ range .Categories }}
+      <div class="module-category">
+        <div class="module-category-head">{{ .Name }} <span class="muted">· {{ len .Modules }}</span></div>
+        <div class="module-list">
+          {{ range .Modules }}
+          <div class="module-row">
+            <div class="module-row-head">
+              <div class="module-info">
+                <h3>{{ .Name }}</h3>
+                <p>{{ .Description }}</p>
+                {{ if .Commands }}
+                <div class="module-cmds">
+                  {{ range .Commands }}{{ range .Signatures }}<code>{{ . }}</code>{{ end }}{{ end }}
                 </div>
+                {{ end }}
               </div>
-              {{ end }}
+              <label class="toggle" title="Toggle {{ .Name }}">
+                <input type="checkbox" name="module_{{ .Name }}"{{ if .Enabled }} checked{{ end }}>
+                <span class="toggle-slider"></span>
+              </label>
             </div>
-          </details>
 
-          <details class="module-perms">
-            <summary>Channel access</summary>
-            <p class="module-perms-help">Limit this module's commands to specific channels. Empty inherits the global setting above.</p>
-            <div class="multiselect"
-                 data-name="channels_module_{{ .Name }}"
-                 data-source="channels"
-                 data-empty="All channels (inherits global)"
-                 data-add-label="+ Add channel"
-                 data-selected="{{ range $i, $id := .ChannelIDs }}{{ if $i }},{{ end }}{{ $id }}{{ end }}">
-            </div>
-          </details>
+            {{ if .Commands }}
+            <details class="module-perms">
+              <summary>Command permissions <span class="muted">· {{ len .Commands }}</span></summary>
+              <p class="module-perms-help">Choose which roles can run each command. Leave a command empty for admin-only. Server admins always have access.</p>
+              <div class="cmd-perms-list">
+                {{ range .Commands }}
+                <div class="cmd-perms-row">
+                  <div class="cmd-perms-name"><code>/{{ .Name }}</code></div>
+                  <div class="multiselect"
+                       data-name="roles_{{ .Name }}"
+                       data-source="roles"
+                       data-empty="Admin-only"
+                       data-add-label="+ Add role"
+                       data-selected="{{ range $i, $id := .SelectedIDs }}{{ if $i }},{{ end }}{{ $id }}{{ end }}">
+                  </div>
+                </div>
+                {{ end }}
+              </div>
+            </details>
+
+            <details class="module-perms">
+              <summary>Channel access</summary>
+              <p class="module-perms-help">Limit this module's commands to specific channels. Empty inherits the global setting above.</p>
+              <div class="multiselect"
+                   data-name="channels_module_{{ .Name }}"
+                   data-source="channels"
+                   data-empty="All channels (inherits global)"
+                   data-add-label="+ Add channel"
+                   data-selected="{{ range $i, $id := .ChannelIDs }}{{ if $i }},{{ end }}{{ $id }}{{ end }}">
+              </div>
+            </details>
+            {{ end }}
+          </div>
           {{ end }}
         </div>
-        {{ end }}
       </div>
+      {{ end }}
 
       <div class="form-actions" style="margin-top:1.25rem;">
         <button type="submit" class="btn btn-primary">Save changes</button>

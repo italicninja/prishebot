@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/user/discord-bot-skeleton/bot"
 )
 
 // ── Composition definitions ───────────────────────────────────────────────────
@@ -222,8 +223,9 @@ func New(dataFile, appID string) *Module {
 	return &Module{dataFile: dataFile, appID: appID, raids: make(map[string]*Raid)}
 }
 
-func (m *Module) Name() string        { return "raid" }
-func (m *Module) Description() string { return "FF14-style raid sign-ups (2T/2H/2M/1R/1C). Post a sign-up embed and let members claim slots with buttons." }
+func (m *Module) Name() string          { return "raid" }
+func (m *Module) Description() string   { return "FF14-style raid sign-ups (2T/2H/2M/1R/1C). Post a sign-up embed and let members claim slots with buttons." }
+func (m *Module) Category() bot.Category { return bot.CategoryFun }
 
 func (m *Module) Commands() []*discordgo.ApplicationCommand {
 	return []*discordgo.ApplicationCommand{

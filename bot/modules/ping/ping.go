@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/user/discord-bot-skeleton/bot"
 )
 
 // Module implements bot.Module for the ping feature.
@@ -16,8 +17,9 @@ type Module struct{}
 // New returns a ready-to-use PingModule.
 func New() *Module { return &Module{} }
 
-func (m *Module) Name() string        { return "ping" }
-func (m *Module) Description() string { return "Responds to /ping with Pong! Useful for checking bot latency." }
+func (m *Module) Name() string          { return "ping" }
+func (m *Module) Description() string   { return "Responds to /ping with Pong! Useful for checking bot latency." }
+func (m *Module) Category() bot.Category { return bot.CategoryFunctional }
 
 // Commands declares the slash commands this module owns.
 func (m *Module) Commands() []*discordgo.ApplicationCommand {

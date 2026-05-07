@@ -2,6 +2,23 @@ package bot
 
 import "github.com/bwmarrin/discordgo"
 
+// Category groups modules in the dashboard and the /modules command.
+type Category string
+
+// CategoryOrder is the canonical display order for Category values.
+// Renderers should iterate this slice rather than ranging a map so the
+// grouping is stable across requests.
+var CategoryOrder = []Category{CategoryFunctional, CategoryFun}
+
+const (
+	// CategoryFunctional groups modules that provide bot administration,
+	// server management, or general utility (ping, info, roles, etc.).
+	CategoryFunctional Category = "Functional"
+	// CategoryFun groups modules that exist for entertainment or social
+	// flair (birthday, raid sign-ups, meow, etc.).
+	CategoryFun Category = "Fun"
+)
+
 // Module is the interface every bot module must implement.
 //
 // A module is a self-contained feature bundle — it owns its own slash commands
@@ -21,6 +38,10 @@ type Module interface {
 
 	// Description returns a short human-readable summary shown in the web UI.
 	Description() string
+
+	// Category groups the module in the dashboard and /modules listings.
+	// Return either CategoryFunctional or CategoryFun.
+	Category() Category
 
 	// Commands returns the slash command definitions this module registers.
 	// These are sent to Discord's API at load time.

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/user/discord-bot-skeleton/bot"
 )
 
 // Module implements bot.Module and bot.MessageHandler.
@@ -23,6 +24,7 @@ func (m *Module) Name() string { return "meow" }
 func (m *Module) Description() string {
 	return "Replies \"meow\" whenever a member's entire message is just \"meow\"."
 }
+func (m *Module) Category() bot.Category { return bot.CategoryFun }
 
 func (m *Module) Commands() []*discordgo.ApplicationCommand { return nil }
 

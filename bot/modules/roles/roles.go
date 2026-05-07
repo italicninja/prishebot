@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/user/discord-bot-skeleton/bot"
 )
 
 // AssignableRole is one role admins have made available for self-assignment.
@@ -40,8 +41,9 @@ func New(dataFile string) *Module {
 	}
 }
 
-func (m *Module) Name() string        { return "roles" }
-func (m *Module) Description() string { return "Lets admins define self-assignable roles; users join or leave them with /role." }
+func (m *Module) Name() string          { return "roles" }
+func (m *Module) Description() string   { return "Lets admins define self-assignable roles; users join or leave them with /role." }
+func (m *Module) Category() bot.Category { return bot.CategoryFunctional }
 
 func (m *Module) Commands() []*discordgo.ApplicationCommand {
 	return []*discordgo.ApplicationCommand{

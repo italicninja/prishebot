@@ -304,6 +304,17 @@ code {
 .tab-panel[hidden] { display: none; }
 
 /* ── Module list ──────────────────────────────────────────────────────────── */
+.module-category { margin-bottom: 1.25rem; }
+.module-category-head {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.5rem;
+}
+.module-category-head .muted { color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+
 .module-list { display: flex; flex-direction: column; gap: 0.6rem; }
 
 .module-row {

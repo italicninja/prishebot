@@ -70,6 +70,7 @@ func main() {
 			out = append(out, info.ModuleListing{
 				Name:        name,
 				Description: mod.Description(),
+				Category:    mod.Category(),
 				Commands:    cmdNames,
 				Enabled:     settings[name],
 			})

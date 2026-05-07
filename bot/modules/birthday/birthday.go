@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/user/discord-bot-skeleton/bot"
 )
 
 // entry holds one user's birthday. LastWished is keyed by guildID so the same
@@ -68,8 +69,9 @@ func New(dataFile, gifsDir string) *Module {
 	}
 }
 
-func (m *Module) Name() string        { return "birthday" }
-func (m *Module) Description() string { return "Remembers birthdays and wishes users on their special day with a GIF." }
+func (m *Module) Name() string          { return "birthday" }
+func (m *Module) Description() string   { return "Remembers birthdays and wishes users on their special day with a GIF." }
+func (m *Module) Category() bot.Category { return bot.CategoryFun }
 
 func (m *Module) Commands() []*discordgo.ApplicationCommand {
 	minMonth, maxMonth := 1.0, 12.0
