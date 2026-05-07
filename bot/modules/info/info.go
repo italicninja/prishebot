@@ -17,20 +17,38 @@ import (
 
 const discordBlurple = 0x5865F2
 
+// ModuleListing is one row in the /modules response, exposed to the bot
+// loader via a closure so this package doesn't have to import bot/.
+type ModuleListing struct {
+	Name        string
+	Description string
+	Commands    []string // top-level command names, with leading slash
+	Enabled     bool     // is the module enabled for the guild being queried
+}
+
+// ListModulesFunc returns the full set of loaded modules and their per-guild
+// enable state. Called at command-run time, so a closure that references the
+// live bot is fine even when this module is loaded before others.
+type ListModulesFunc func(guildID string) []ModuleListing
+
 // Module implements bot.Module for server and bot information commands.
 type Module struct {
-	appID     string
-	startTime time.Time
+	appID       string
+	startTime   time.Time
+	listModules ListModulesFunc
 }
 
 // New creates the info module. appID is the Discord application / client ID;
-// startTime is when the process started (used in both status and bio).
-func New(appID string, startTime time.Time) *Module {
-	return &Module{appID: appID, startTime: startTime}
+// startTime is when the process started (used in both status and bio);
+// listModules supplies the data shown by /modules at command-run time.
+func New(appID string, startTime time.Time, listModules ListModulesFunc) *Module {
+	return &Module{appID: appID, startTime: startTime, listModules: listModules}
 }
 
-func (m *Module) Name() string        { return "info" }
-func (m *Module) Description() string { return "Provides /serverinfo and /botinfo slash commands." }
+func (m *Module) Name() string { return "info" }
+func (m *Module) Description() string {
+	return "Provides /serverinfo, /botinfo, and /modules slash commands."
+}
 
 func (m *Module) Commands() []*discordgo.ApplicationCommand {
 	return []*discordgo.ApplicationCommand{
@@ -42,6 +60,10 @@ func (m *Module) Commands() []*discordgo.ApplicationCommand {
 			Name:        "botinfo",
 			Description: "Display information about the bot",
 		},
+		{
+			Name:        "modules",
+			Description: "List the modules currently active on this server",
+		},
 	}
 }
 
@@ -52,6 +74,8 @@ func (m *Module) HandleInteraction(s *discordgo.Session, i *discordgo.Interactio
 		m.serverInfo(s, i)
 	case "botinfo":
 		m.botInfo(s, i)
+	case "modules":
+		m.modulesList(s, i)
 	}
 }
 
@@ -174,6 +198,82 @@ func (m *Module) botInfo(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}); err != nil {
 		log.Printf("[info] failed to respond to /botinfo: %v", err)
 	}
+}
+
+// modulesList responds with an embed listing the currently active modules in
+// the guild, plus a footer note for any that are loaded but disabled.
+// The response is ephemeral — this is admin-facing config, not a public reply.
+func (m *Module) modulesList(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.GuildID == "" {
+		respondError(s, i, "This command only works in a server.")
+		return
+	}
+	if m.listModules == nil {
+		respondError(s, i, "Module listing isn't wired up.")
+		return
+	}
+
+	listings := m.listModules(i.GuildID)
+
+	var fields []*discordgo.MessageEmbedField
+	var disabled []string
+	for _, ml := range listings {
+		if !ml.Enabled {
+			disabled = append(disabled, ml.Name)
+			continue
+		}
+		var lines []string
+		if ml.Description != "" {
+			lines = append(lines, ml.Description)
+		}
+		if len(ml.Commands) > 0 {
+			cmds := make([]string, len(ml.Commands))
+			for idx, c := range ml.Commands {
+				cmds[idx] = "`" + c + "`"
+			}
+			lines = append(lines, "Commands: "+strings.Join(cmds, ", "))
+		} else {
+			lines = append(lines, "_No slash commands._")
+		}
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:  "✅ " + ml.Name,
+			Value: strings.Join(lines, "\n"),
+		})
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title: "Active modules",
+		Color: discordBlurple,
+	}
+	if len(fields) == 0 {
+		embed.Description = "_No modules are currently enabled in this server._"
+	} else {
+		embed.Description = fmt.Sprintf("**%d** module%s enabled in this server.",
+			len(fields), pluralS(len(fields)))
+		embed.Fields = fields
+	}
+	if len(disabled) > 0 {
+		embed.Footer = &discordgo.MessageEmbedFooter{
+			Text: "Disabled: " + strings.Join(disabled, ", "),
+		}
+	}
+
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+			Flags:  discordgo.MessageFlagsEphemeral,
+		},
+	}); err != nil {
+		log.Printf("[info] failed to respond to /modules: %v", err)
+	}
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // respondError sends an ephemeral error message back to the user.

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"syscall"
 	"time"
 
@@ -53,7 +54,30 @@ func main() {
 	if err := b.LoadModule(ping.New()); err != nil {
 		log.Fatalf("failed to load ping module: %v", err)
 	}
-	if err := b.LoadModule(info.New(cfg.ClientID, startTime)); err != nil {
+	// Closure powers /modules — captures `b` so it sees the full module
+	// roster once every module has finished loading.
+	listModules := func(guildID string) []info.ModuleListing {
+		settings := b.GuildModuleSettings(guildID)
+		mods := b.Modules()
+		out := make([]info.ModuleListing, 0, len(mods))
+		for name, mod := range mods {
+			cmds := mod.Commands()
+			cmdNames := make([]string, 0, len(cmds))
+			for _, c := range cmds {
+				cmdNames = append(cmdNames, "/"+c.Name)
+			}
+			sort.Strings(cmdNames)
+			out = append(out, info.ModuleListing{
+				Name:        name,
+				Description: mod.Description(),
+				Commands:    cmdNames,
+				Enabled:     settings[name],
+			})
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+		return out
+	}
+	if err := b.LoadModule(info.New(cfg.ClientID, startTime, listModules)); err != nil {
 		log.Fatalf("failed to load info module: %v", err)
 	}
 	if err := b.LoadModule(birthday.New(cfg.BirthdayDataFile, cfg.GIFsDir)); err != nil {
