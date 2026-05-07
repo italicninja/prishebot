@@ -42,6 +42,10 @@ type Bot struct {
 	// All commands default to admin-only; admins use the web UI to grant roles.
 	commandPerms *CommandPermissions
 
+	// channelPerms enforces per-guild channel allow-lists on slash commands.
+	// Empty allow-lists at every layer mean "all channels" — the default.
+	channelPerms *ChannelPermissions
+
 	startTime time.Time
 }
 
@@ -70,6 +74,7 @@ func New(cfg *config.Config) (*Bot, error) {
 		guildSettings:  make(map[string]map[string]bool),
 		registeredCmds: make(map[string][]*discordgo.ApplicationCommand),
 		commandPerms:   NewCommandPermissions(cfg.CommandPermsFile),
+		channelPerms:   NewChannelPermissions(cfg.ChannelPermsFile),
 	}
 
 	// Register the single interaction handler. discordgo calls this for every
@@ -327,12 +332,33 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		}
 	}
 
+	// Per-guild channel allow-list gate (global + per-module, AND'd).
+	// Slash commands only; components and autocomplete fall through.
+	if i.Type == discordgo.InteractionApplicationCommand && i.GuildID != "" && i.ChannelID != "" {
+		if !b.channelPerms.Allowed(i.GuildID, m.Name(), i.ChannelID) {
+			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "🚫 Prishe doesn't accept commands in this channel. A server admin can change this on the dashboard.",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			}); err != nil {
+				log.Printf("[bot] failed to send channel-denied response: %v", err)
+			}
+			return
+		}
+	}
+
 	m.HandleInteraction(s, i)
 }
 
 // CommandPerms exposes the role-lock store so the web dashboard can read
 // and update per-guild allow-lists.
 func (b *Bot) CommandPerms() *CommandPermissions { return b.commandPerms }
+
+// ChannelPerms exposes the channel-allow-list store so the web dashboard can
+// read and update per-guild settings.
+func (b *Bot) ChannelPerms() *ChannelPermissions { return b.channelPerms }
 
 // CommandInfo describes one registered top-level slash command for the web UI.
 type CommandInfo struct {

@@ -53,6 +53,22 @@
   <!-- Settings tab -->
   <div id="tab-settings" class="tab-panel" role="tabpanel">
     <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/modules">
+
+      <!-- Global channel access -->
+      <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.75rem;">Global channel access</div>
+      <div class="card" style="margin-bottom:1.5rem;">
+        <p class="module-perms-help" style="margin:0 0 0.75rem;">
+          Restrict where Prishe responds to slash commands across <em>all</em> modules. Leave empty to allow every channel.
+        </p>
+        <div class="multiselect"
+             data-name="channels_global"
+             data-source="channels"
+             data-empty="All channels"
+             data-add-label="+ Add channel"
+             data-selected="{{ range $i, $id := .GlobalChannels }}{{ if $i }},{{ end }}{{ $id }}{{ end }}">
+        </div>
+      </div>
+
       <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.75rem;">Modules</div>
 
       {{ if not .Modules }}
@@ -89,12 +105,27 @@
               {{ range .Commands }}
               <div class="cmd-perms-row">
                 <div class="cmd-perms-name"><code>/{{ .Name }}</code></div>
-                <div class="role-multiselect"
+                <div class="multiselect"
                      data-name="roles_{{ .Name }}"
+                     data-source="roles"
+                     data-empty="Admin-only"
+                     data-add-label="+ Add role"
                      data-selected="{{ range $i, $id := .SelectedIDs }}{{ if $i }},{{ end }}{{ $id }}{{ end }}">
                 </div>
               </div>
               {{ end }}
+            </div>
+          </details>
+
+          <details class="module-perms">
+            <summary>Channel access</summary>
+            <p class="module-perms-help">Limit this module's commands to specific channels. Empty inherits the global setting above.</p>
+            <div class="multiselect"
+                 data-name="channels_module_{{ .Name }}"
+                 data-source="channels"
+                 data-empty="All channels (inherits global)"
+                 data-add-label="+ Add channel"
+                 data-selected="{{ range $i, $id := .ChannelIDs }}{{ if $i }},{{ end }}{{ $id }}{{ end }}">
             </div>
           </details>
           {{ end }}
@@ -131,8 +162,9 @@
 </div>
 
 <script>
-  // Available roles for the multi-select component (id, name, color).
-  window.PRISHE_ROLES = {{ .RolesJSON }};
+  // Option sources for the chip multi-select component.
+  window.PRISHE_ROLES    = {{ .RolesJSON }};
+  window.PRISHE_CHANNELS = {{ .ChannelsJSON }};
 </script>
 <script>
 (function(){
@@ -149,7 +181,7 @@
   if(window.location.hash==='#danger') activate('danger');
 }());
 </script>
-<script src="/static/role-multiselect.js"></script>
+<script src="/static/multiselect.js"></script>
 {{ template "theme-js" . }}
 </body>
 </html>

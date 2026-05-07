@@ -172,6 +172,7 @@ func (s *Server) handleServerPage(c *gin.Context) {
 
 	cp := s.bot.CommandPerms()
 	configured := cp.GuildSettings(guildID)
+	chp := s.bot.ChannelPerms()
 
 	type CommandRow struct {
 		Name        string   // top-level command name, e.g. "raid"
@@ -183,6 +184,7 @@ func (s *Server) handleServerPage(c *gin.Context) {
 		Description string
 		Enabled     bool
 		Commands    []CommandRow
+		ChannelIDs  []string // configured per-module channel allow-list
 	}
 
 	var rows []ModuleRow
@@ -200,6 +202,7 @@ func (s *Server) handleServerPage(c *gin.Context) {
 			Description: mod.Description(),
 			Enabled:     settings[name],
 			Commands:    cmdRows,
+			ChannelIDs:  chp.GetModule(guildID, name),
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
@@ -244,13 +247,37 @@ func (s *Server) handleServerPage(c *gin.Context) {
 	}
 	rolesJSON, _ := json.Marshal(roleOptions)
 
+	// Available text channels for the channel multi-select.
+	type ChannelOpt struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	var channelOptions []ChannelOpt
+	if guild.BotPresent {
+		if gchans, err := s.bot.Session().GuildChannels(guildID); err == nil {
+			for _, ch := range gchans {
+				if ch.Type == discordgo.ChannelTypeGuildText {
+					channelOptions = append(channelOptions, ChannelOpt{ID: ch.ID, Name: "#" + ch.Name})
+				}
+			}
+			sort.Slice(channelOptions, func(i, j int) bool {
+				return strings.ToLower(channelOptions[i].Name) < strings.ToLower(channelOptions[j].Name)
+			})
+		} else {
+			log.Printf("[web] GuildChannels %s: %v", guildID, err)
+		}
+	}
+	channelsJSON, _ := json.Marshal(channelOptions)
+
 	if err := s.tmpl.ExecuteTemplate(c.Writer, "server.html", gin.H{
-		"User":      sess,
-		"Guild":     &guild,
-		"Modules":   rows,
-		"RolesJSON": template.JS(rolesJSON),
-		"Saved":     c.Query("saved") == "1",
-		"ClientID":  s.cfg.ClientID,
+		"User":           sess,
+		"Guild":          &guild,
+		"Modules":        rows,
+		"GlobalChannels": chp.GetGlobal(guildID),
+		"RolesJSON":      template.JS(rolesJSON),
+		"ChannelsJSON":   template.JS(channelsJSON),
+		"Saved":          c.Query("saved") == "1",
+		"ClientID":       s.cfg.ClientID,
 	}); err != nil {
 		log.Printf("[web] failed to render server.html: %v", err)
 		c.Status(http.StatusInternalServerError)
@@ -320,7 +347,25 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 		cp.SetRoles(guildID, ci.Name, ids)
 	}
 
+	// Save channel allow-lists: global + one per module.
+	chp := s.bot.ChannelPerms()
+	chp.SetGlobal(guildID, cleanIDs(c.Request.PostForm["channels_global"]))
+	for name := range s.bot.Modules() {
+		chp.SetModule(guildID, name, cleanIDs(c.Request.PostForm["channels_module_"+name]))
+	}
+
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"?saved=1")
+}
+
+// cleanIDs trims and drops empty values from a form-submitted slice of IDs.
+func cleanIDs(in []string) []string {
+	var out []string
+	for _, v := range in {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

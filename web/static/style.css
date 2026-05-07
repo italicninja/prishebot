@@ -390,8 +390,8 @@ code {
   color: #a5b4fc;
 }
 
-/* ── Chip multi-select (role-multiselect) ─────────────────────────────────── */
-.role-multiselect {
+/* ── Chip multi-select (.multiselect) ─────────────────────────────────────── */
+.multiselect {
   position: relative;
   display: flex;
   flex-wrap: wrap;
@@ -404,39 +404,39 @@ code {
   border-radius: var(--radius);
   transition: border-color 0.15s;
 }
-.role-multiselect:focus-within { border-color: var(--accent); }
-.rms-pills {
+.multiselect:focus-within { border-color: var(--accent); }
+.ms-pills {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
   align-items: center;
 }
-.rms-empty {
+.ms-empty {
   color: var(--muted);
   font-size: 0.8rem;
   font-style: italic;
   padding: 0.15rem 0.4rem;
 }
-.rms-pill {
+.ms-pill {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
   padding: 0.15rem 0.35rem 0.15rem 0.5rem;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--rms-color, var(--accent));
+  border-left: 3px solid var(--ms-color, var(--accent));
   border-radius: 999px;
   font-size: 0.8rem;
   line-height: 1.3;
 }
-.rms-dot {
+.ms-dot {
   width: 0.55rem;
   height: 0.55rem;
   border-radius: 50%;
   flex-shrink: 0;
   display: inline-block;
 }
-.rms-remove {
+.ms-remove {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -452,9 +452,9 @@ code {
   padding: 0;
   margin-left: 0.1rem;
 }
-.rms-remove:hover { background: var(--surface-2); color: var(--red); }
-.rms-control { margin-left: auto; position: relative; }
-.rms-add {
+.ms-remove:hover { background: var(--surface-2); color: var(--red); }
+.ms-control { margin-left: auto; position: relative; }
+.ms-add {
   background: transparent;
   border: 1px dashed var(--border);
   color: var(--muted);
@@ -464,9 +464,9 @@ code {
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
 }
-.rms-add:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
-.rms-add:disabled { opacity: 0.5; cursor: not-allowed; }
-.rms-popup {
+.ms-add:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.ms-add:disabled { opacity: 0.5; cursor: not-allowed; }
+.ms-popup {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
@@ -482,8 +482,8 @@ code {
   z-index: 50;
   overflow: hidden;
 }
-.role-multiselect.open .rms-popup { display: flex; }
-.rms-filter {
+.multiselect.open .ms-popup { display: flex; }
+.ms-filter {
   border: 0;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
@@ -493,13 +493,13 @@ code {
   font-size: 0.85rem;
   outline: none;
 }
-.rms-options {
+.ms-options {
   list-style: none;
   margin: 0;
   padding: 0.25rem;
   overflow-y: auto;
 }
-.rms-option {
+.ms-option {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -508,8 +508,8 @@ code {
   cursor: pointer;
   font-size: 0.85rem;
 }
-.rms-option:hover, .rms-option:focus { background: var(--accent-dim); outline: none; }
-.rms-none {
+.ms-option:hover, .ms-option:focus { background: var(--accent-dim); outline: none; }
+.ms-none {
   list-style: none;
   padding: 0.6rem 0.7rem;
   color: var(--muted);
