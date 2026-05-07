@@ -113,8 +113,6 @@ func (s *Server) routes() *gin.Engine {
 		dash.GET("/server/:id/raids", s.handleRaidsPage)
 		dash.POST("/server/:id/raids/create", s.handleCreateRaidWeb)
 		dash.POST("/server/:id/raids/:raidID/close", s.handleCloseRaidWeb)
-		dash.GET("/server/:id/permissions", s.handlePermissionsPage)
-		dash.POST("/server/:id/permissions", s.handleUpdatePermissions)
 	}
 
 	return r

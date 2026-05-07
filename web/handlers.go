@@ -164,31 +164,93 @@ func (s *Server) handleServerPage(c *gin.Context) {
 	settings := s.bot.GuildModuleSettings(guildID)
 	modules := s.bot.Modules()
 
+	// Group registered command names by owning module.
+	cmdsByModule := make(map[string][]string)
+	for _, ci := range s.bot.RegisteredCommands() {
+		cmdsByModule[ci.Module] = append(cmdsByModule[ci.Module], ci.Name)
+	}
+
+	cp := s.bot.CommandPerms()
+	configured := cp.GuildSettings(guildID)
+
+	type CommandRow struct {
+		Name        string   // top-level command name, e.g. "raid"
+		Signatures  []string // pretty signatures for display, e.g. "/raid create <title>"
+		SelectedIDs []string // configured role IDs (preserves order)
+	}
 	type ModuleRow struct {
 		Name        string
 		Description string
 		Enabled     bool
-		Commands    []string
+		Commands    []CommandRow
 	}
+
 	var rows []ModuleRow
 	for name, mod := range modules {
-		var cmds []string
+		var cmdRows []CommandRow
 		for _, c := range mod.Commands() {
-			cmds = append(cmds, commandSignatures(c)...)
+			cmdRows = append(cmdRows, CommandRow{
+				Name:        c.Name,
+				Signatures:  commandSignatures(c),
+				SelectedIDs: configured[c.Name],
+			})
 		}
 		rows = append(rows, ModuleRow{
 			Name:        name,
 			Description: mod.Description(),
 			Enabled:     settings[name],
-			Commands:    cmds,
+			Commands:    cmdRows,
 		})
 	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
+
+	// Available roles for the multi-select. Includes @everyone (its role ID
+	// equals the guild ID) so admins can open a command to all members.
+	type RoleOption struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		ColorHex string `json:"color"`
+	}
+	var roleOptions []RoleOption
+	if guild.BotPresent {
+		discordRoles, err := s.bot.Session().GuildRoles(guildID)
+		if err != nil {
+			log.Printf("[web] GuildRoles %s: %v", guildID, err)
+		} else {
+			for _, r := range discordRoles {
+				if r.Managed {
+					continue
+				}
+				display := r.Name
+				if r.ID == guildID {
+					display = "@everyone"
+				}
+				roleOptions = append(roleOptions, RoleOption{
+					ID:       r.ID,
+					Name:     display,
+					ColorHex: roleColorHex(r.Color),
+				})
+			}
+			sort.SliceStable(roleOptions, func(i, j int) bool {
+				if roleOptions[i].ID == guildID {
+					return true
+				}
+				if roleOptions[j].ID == guildID {
+					return false
+				}
+				return strings.ToLower(roleOptions[i].Name) < strings.ToLower(roleOptions[j].Name)
+			})
+		}
+	}
+	rolesJSON, _ := json.Marshal(roleOptions)
 
 	if err := s.tmpl.ExecuteTemplate(c.Writer, "server.html", gin.H{
-		"User":     sess,
-		"Guild":    &guild,
-		"Modules":  rows,
-		"ClientID": s.cfg.ClientID,
+		"User":      sess,
+		"Guild":     &guild,
+		"Modules":   rows,
+		"RolesJSON": template.JS(rolesJSON),
+		"Saved":     c.Query("saved") == "1",
+		"ClientID":  s.cfg.ClientID,
 	}); err != nil {
 		log.Printf("[web] failed to render server.html: %v", err)
 		c.Status(http.StatusInternalServerError)
@@ -214,7 +276,10 @@ func (s *Server) handleLeaveServer(c *gin.Context) {
 	c.Redirect(http.StatusFound, "/dashboard")
 }
 
-// handleUpdateModules processes the module toggle form on the server page.
+// handleUpdateModules processes the combined module-and-permissions form on
+// the server page. The form posts:
+//   - module_<name>            — checkbox per enabled module
+//   - roles_<commandName>      — zero or more role IDs per command
 func (s *Server) handleUpdateModules(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
@@ -229,9 +294,6 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 		return
 	}
 
-	// The HTML form sends a checkbox named "module_<name>" for each enabled
-	// module. Modules whose checkboxes are unchecked simply don't appear in
-	// the form — so any module *not* in the form data should be disabled.
 	enabled := make(map[string]bool)
 	for key := range c.Request.Form {
 		if name, ok := strings.CutPrefix(key, "module_"); ok {
@@ -244,7 +306,21 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 		s.bot.SetModuleEnabled(guildID, name, enabled[name])
 	}
 
-	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID)
+	// Save per-command role-lock selections. Iterate the registered command
+	// list (not raw form keys) so a malicious form can't set role-locks on
+	// commands that don't exist.
+	cp := s.bot.CommandPerms()
+	for _, ci := range s.bot.RegisteredCommands() {
+		var ids []string
+		for _, id := range c.Request.PostForm["roles_"+ci.Name] {
+			if id = strings.TrimSpace(id); id != "" {
+				ids = append(ids, id)
+			}
+		}
+		cp.SetRoles(guildID, ci.Name, ids)
+	}
+
+	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"?saved=1")
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -928,127 +1004,3 @@ func buildSigs(prefix string, opts []*discordgo.ApplicationCommandOption) []stri
 	return []string{sb.String()}
 }
 
-// handlePermissionsPage renders the per-command role-lock UI for a guild.
-func (s *Server) handlePermissionsPage(c *gin.Context) {
-	sess := c.MustGet("session").(*Session)
-	guildID := c.Param("id")
-
-	src := findGuild(sess.Guilds, guildID)
-	if src == nil {
-		c.String(http.StatusForbidden, "You don't have admin access to that server.")
-		return
-	}
-	guild := *src
-	guild.BotPresent = s.botGuildSet()[guildID]
-
-	type RoleOption struct {
-		ID       string
-		Name     string
-		ColorHex string
-	}
-	var roleOptions []RoleOption
-	if guild.BotPresent {
-		discordRoles, err := s.bot.Session().GuildRoles(guildID)
-		if err != nil {
-			log.Printf("[web] GuildRoles %s: %v", guildID, err)
-			c.String(http.StatusInternalServerError, "Could not fetch guild roles.")
-			return
-		}
-		// Include @everyone (its role ID matches the guild ID) so admins can
-		// open a command to all members. Skip bot-managed roles — they can't
-		// be assigned to humans.
-		for _, r := range discordRoles {
-			if r.Managed {
-				continue
-			}
-			name := r.Name
-			if r.ID == guildID {
-				name = "@everyone"
-			}
-			roleOptions = append(roleOptions, RoleOption{
-				ID:       r.ID,
-				Name:     name,
-				ColorHex: roleColorHex(r.Color),
-			})
-		}
-		// @everyone first, then alphabetical.
-		sort.SliceStable(roleOptions, func(i, j int) bool {
-			if roleOptions[i].ID == guildID {
-				return true
-			}
-			if roleOptions[j].ID == guildID {
-				return false
-			}
-			return strings.ToLower(roleOptions[i].Name) < strings.ToLower(roleOptions[j].Name)
-		})
-	}
-
-	cp := s.bot.CommandPerms()
-	configured := cp.GuildSettings(guildID)
-
-	type CommandRow struct {
-		Name        string
-		Module      string
-		Selected    map[string]bool
-		AdminOnly   bool
-	}
-	var rows []CommandRow
-	for _, ci := range s.bot.RegisteredCommands() {
-		sel := make(map[string]bool, len(configured[ci.Name]))
-		for _, rid := range configured[ci.Name] {
-			sel[rid] = true
-		}
-		rows = append(rows, CommandRow{
-			Name:      ci.Name,
-			Module:    ci.Module,
-			Selected:  sel,
-			AdminOnly: len(sel) == 0,
-		})
-	}
-
-	if err := s.tmpl.ExecuteTemplate(c.Writer, "permissions.html", gin.H{
-		"User":     sess,
-		"Guild":    &guild,
-		"Commands": rows,
-		"Roles":    roleOptions,
-		"Saved":    c.Query("saved") == "1",
-		"ClientID": s.cfg.ClientID,
-	}); err != nil {
-		log.Printf("[web] permissions template error: %v", err)
-		c.Status(http.StatusInternalServerError)
-	}
-}
-
-// handleUpdatePermissions saves the per-command role-lock form.
-//
-// The form sends one checkbox per (command, role) pair, named "roles_<cmd>"
-// with value=<roleID>. Commands not present in the form are cleared (=
-// admin-only). We only iterate known commands so a malicious form can't
-// register arbitrary command names.
-func (s *Server) handleUpdatePermissions(c *gin.Context) {
-	sess := c.MustGet("session").(*Session)
-	guildID := c.Param("id")
-
-	if findGuild(sess.Guilds, guildID) == nil {
-		c.String(http.StatusForbidden, "Access denied.")
-		return
-	}
-
-	if err := c.Request.ParseForm(); err != nil {
-		c.String(http.StatusBadRequest, "Invalid form data.")
-		return
-	}
-
-	cp := s.bot.CommandPerms()
-	for _, ci := range s.bot.RegisteredCommands() {
-		var out []string
-		for _, id := range c.Request.PostForm["roles_"+ci.Name] {
-			if id = strings.TrimSpace(id); id != "" {
-				out = append(out, id)
-			}
-		}
-		cp.SetRoles(guildID, ci.Name, out)
-	}
-
-	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/permissions?saved=1")
-}

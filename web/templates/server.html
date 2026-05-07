@@ -36,16 +36,19 @@
   {{ else }}
 
   <div style="display:flex;gap:0.6rem;flex-wrap:wrap;margin-bottom:1.75rem;">
-    <a href="/dashboard/server/{{ .Guild.ID }}/roles"       class="btn btn-ghost btn-sm">Self-assignable roles</a>
-    <a href="/dashboard/server/{{ .Guild.ID }}/birthday"    class="btn btn-ghost btn-sm">Birthday settings</a>
-    <a href="/dashboard/server/{{ .Guild.ID }}/raids"       class="btn btn-ghost btn-sm">Raid calendar</a>
-    <a href="/dashboard/server/{{ .Guild.ID }}/permissions" class="btn btn-ghost btn-sm">Command permissions</a>
+    <a href="/dashboard/server/{{ .Guild.ID }}/roles"    class="btn btn-ghost btn-sm">Self-assignable roles</a>
+    <a href="/dashboard/server/{{ .Guild.ID }}/birthday" class="btn btn-ghost btn-sm">Birthday settings</a>
+    <a href="/dashboard/server/{{ .Guild.ID }}/raids"    class="btn btn-ghost btn-sm">Raid calendar</a>
   </div>
 
   <div class="tabs" role="tablist">
     <button class="tab active" role="tab" aria-selected="true"  data-tab="settings">Settings</button>
     <button class="tab tab-danger"  role="tab" aria-selected="false" data-tab="danger">Danger Zone</button>
   </div>
+
+  {{ if .Saved }}
+  <div class="banner banner-success" style="margin-bottom:1rem;">Settings saved.</div>
+  {{ end }}
 
   <!-- Settings tab -->
   <div id="tab-settings" class="tab-panel" role="tabpanel">
@@ -62,24 +65,44 @@
       <div class="module-list">
         {{ range .Modules }}
         <div class="module-row">
-          <div class="module-info">
-            <h3>{{ .Name }}</h3>
-            <p>{{ .Description }}</p>
-            {{ if .Commands }}
-            <div class="module-cmds">
-              {{ range .Commands }}<code>{{ . }}</code>{{ end }}
+          <div class="module-row-head">
+            <div class="module-info">
+              <h3>{{ .Name }}</h3>
+              <p>{{ .Description }}</p>
+              {{ if .Commands }}
+              <div class="module-cmds">
+                {{ range .Commands }}{{ range .Signatures }}<code>{{ . }}</code>{{ end }}{{ end }}
+              </div>
+              {{ end }}
             </div>
-            {{ end }}
+            <label class="toggle" title="Toggle {{ .Name }}">
+              <input type="checkbox" name="module_{{ .Name }}"{{ if .Enabled }} checked{{ end }}>
+              <span class="toggle-slider"></span>
+            </label>
           </div>
-          <label class="toggle" title="Toggle {{ .Name }}">
-            <input type="checkbox" name="module_{{ .Name }}"{{ if .Enabled }} checked{{ end }}>
-            <span class="toggle-slider"></span>
-          </label>
+
+          {{ if .Commands }}
+          <details class="module-perms">
+            <summary>Command permissions <span class="muted">· {{ len .Commands }}</span></summary>
+            <p class="module-perms-help">Choose which roles can run each command. Leave a command empty for admin-only. Server admins always have access.</p>
+            <div class="cmd-perms-list">
+              {{ range .Commands }}
+              <div class="cmd-perms-row">
+                <div class="cmd-perms-name"><code>/{{ .Name }}</code></div>
+                <div class="role-multiselect"
+                     data-name="roles_{{ .Name }}"
+                     data-selected="{{ range $i, $id := .SelectedIDs }}{{ if $i }},{{ end }}{{ $id }}{{ end }}">
+                </div>
+              </div>
+              {{ end }}
+            </div>
+          </details>
+          {{ end }}
         </div>
         {{ end }}
       </div>
 
-      <div class="form-actions">
+      <div class="form-actions" style="margin-top:1.25rem;">
         <button type="submit" class="btn btn-primary">Save changes</button>
         <a href="/dashboard" class="btn btn-ghost">Cancel</a>
       </div>
@@ -108,6 +131,10 @@
 </div>
 
 <script>
+  // Available roles for the multi-select component (id, name, color).
+  window.PRISHE_ROLES = {{ .RolesJSON }};
+</script>
+<script>
 (function(){
   var tabs   = document.querySelectorAll('.tab');
   var panels = document.querySelectorAll('.tab-panel');
@@ -122,6 +149,7 @@
   if(window.location.hash==='#danger') activate('danger');
 }());
 </script>
+<script src="/static/role-multiselect.js"></script>
 {{ template "theme-js" . }}
 </body>
 </html>
