@@ -13,6 +13,7 @@ import (
 	"github.com/user/discord-bot-skeleton/bot"
 	"github.com/user/discord-bot-skeleton/bot/modules/birthday"
 	"github.com/user/discord-bot-skeleton/bot/modules/info"
+	"github.com/user/discord-bot-skeleton/bot/modules/meow"
 	"github.com/user/discord-bot-skeleton/bot/modules/ping"
 	"github.com/user/discord-bot-skeleton/bot/modules/raid"
 	"github.com/user/discord-bot-skeleton/bot/modules/roles"
@@ -63,6 +64,9 @@ func main() {
 	}
 	if err := b.LoadModule(raid.New(cfg.RaidDataFile, cfg.ClientID)); err != nil {
 		log.Fatalf("failed to load raid module: %v", err)
+	}
+	if err := b.LoadModule(meow.New()); err != nil {
+		log.Fatalf("failed to load meow module: %v", err)
 	}
 
 	if err := b.Start(); err != nil {

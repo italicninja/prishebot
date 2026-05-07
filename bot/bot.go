@@ -61,10 +61,17 @@ func New(cfg *config.Config) (*Bot, error) {
 	// Only request what you need — more intents mean more events and more
 	// potential for rate limiting. Modules that need additional intents
 	// (e.g. voice, DMs) should document that requirement.
-	// IntentsGuilds is sufficient for slash commands. Add IntentsGuildMessages
-	// and IntentsMessageContent (a privileged intent requiring portal approval)
-	// only if a module needs to read message text.
-	session.Identify.Intents = discordgo.IntentsGuilds
+	//
+	// IntentsGuilds       — required for slash command routing.
+	// IntentsGuildMessages — required for MessageCreate events (e.g. the meow module).
+	// IntentsMessageContent — required to read the text of those messages.
+	//   This is a PRIVILEGED intent: it must be enabled in the Discord developer
+	//   portal for any bot in 100+ servers, and is recommended for everyone.
+	//   Without it, message-content fields arrive empty and message-listening
+	//   modules silently do nothing.
+	session.Identify.Intents = discordgo.IntentsGuilds |
+		discordgo.IntentsGuildMessages |
+		discordgo.IntentsMessageContent
 
 	b := &Bot{
 		session:        session,
@@ -80,6 +87,11 @@ func New(cfg *config.Config) (*Bot, error) {
 	// Register the single interaction handler. discordgo calls this for every
 	// slash command and component interaction. We then route internally.
 	session.AddHandler(b.handleInteraction)
+
+	// Register the single message-event handler. We dispatch internally to
+	// any loaded module that implements bot.MessageHandler, after applying
+	// the per-guild module-enable toggle and channel allow-list.
+	session.AddHandler(b.handleMessage)
 
 	return b, nil
 }
@@ -350,6 +362,36 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 	}
 
 	m.HandleInteraction(s, i)
+}
+
+// handleMessage dispatches MessageCreate events to every loaded module that
+// implements MessageHandler, applying the per-guild module-enable toggle and
+// channel allow-list. Bots' own messages are dropped early to avoid loops.
+func (b *Bot) handleMessage(s *discordgo.Session, msg *discordgo.MessageCreate) {
+	if msg.Author == nil || msg.Author.Bot {
+		return
+	}
+	// Snapshot the modules under the lock so dispatch happens lock-free.
+	b.mu.RLock()
+	listeners := make([]Module, 0, len(b.modules))
+	for _, m := range b.modules {
+		if _, ok := m.(MessageHandler); ok {
+			listeners = append(listeners, m)
+		}
+	}
+	b.mu.RUnlock()
+
+	for _, m := range listeners {
+		if msg.GuildID != "" {
+			if !b.IsModuleEnabled(msg.GuildID, m.Name()) {
+				continue
+			}
+			if !b.channelPerms.Allowed(msg.GuildID, m.Name(), msg.ChannelID) {
+				continue
+			}
+		}
+		m.(MessageHandler).HandleMessage(s, msg)
+	}
 }
 
 // CommandPerms exposes the role-lock store so the web dashboard can read

@@ -40,3 +40,15 @@ type Module interface {
 	// Stop goroutines, close connections, and release resources here.
 	OnUnload(s *discordgo.Session) error
 }
+
+// MessageHandler is an optional add-on a Module can implement to react to
+// plain (non-interaction) messages. The bot core dispatches MessageCreate
+// events to every loaded Module that satisfies this interface, after
+// applying the per-guild module-enable toggle and channel allow-list.
+//
+// Modules that implement this need the application to be running with the
+// IntentsGuildMessages and the privileged IntentsMessageContent intents,
+// and the latter must be granted in the Discord developer portal.
+type MessageHandler interface {
+	HandleMessage(s *discordgo.Session, m *discordgo.MessageCreate)
+}
