@@ -418,6 +418,22 @@ type CommandInfo struct {
 	Module string
 }
 
+// CommandIDByName returns the Discord-issued command ID for a top-level
+// slash command, or "" if no command by that name is registered. The same ID
+// is used in every guild because commands are registered globally.
+func (b *Bot) CommandIDByName(name string) string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for _, cmds := range b.registeredCmds {
+		for _, c := range cmds {
+			if c.Name == name {
+				return c.ID
+			}
+		}
+	}
+	return ""
+}
+
 // RegisteredCommands returns every command currently registered with Discord,
 // sorted by command name. Used to render the role-lock UI.
 func (b *Bot) RegisteredCommands() []CommandInfo {

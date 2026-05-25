@@ -28,13 +28,17 @@ type Server struct {
 func NewServer(cfg *config.Config, b *bot.Bot) *Server {
 	// Configure the Discord OAuth2 client.
 	// Scopes:
-	//   "identify" — read username, avatar, discriminator
-	//   "guilds"   — list the user's servers (and their permissions in each)
+	//   "identify"                                  — read username, avatar, discriminator
+	//   "guilds"                                    — list the user's servers (and their permissions)
+	//   "applications.commands.permissions.update"  — push per-guild slash-command
+	//      visibility overrides on behalf of the logged-in admin, so the
+	//      dashboard's role allow-list also controls who sees the command in
+	//      Discord's slash menu (not just runtime enforcement)
 	oauthCfg := &oauth2.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
 		RedirectURL:  cfg.RedirectURI,
-		Scopes:       []string{"identify", "guilds"},
+		Scopes:       []string{"identify", "guilds", "applications.commands.permissions.update"},
 		Endpoint:     DiscordEndpoint,
 	}
 

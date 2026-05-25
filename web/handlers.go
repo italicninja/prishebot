@@ -384,6 +384,13 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 	// Save per-command role-lock selections. Iterate the registered command
 	// list (not raw form keys) so a malicious form can't set role-locks on
 	// commands that don't exist.
+	//
+	// After saving each list, push the same overrides to Discord so the slash
+	// menu's visibility matches the dashboard. We do this with the admin's
+	// own OAuth token (the endpoint requires a user token with the
+	// applications.commands.permissions.update scope — see discord_perms.go).
+	// Failures are logged but don't fail the save: the dashboard is still the
+	// source of truth for runtime enforcement.
 	cp := s.bot.CommandPerms()
 	for _, ci := range s.bot.RegisteredCommands() {
 		var ids []string
@@ -393,6 +400,14 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 			}
 		}
 		cp.SetRoles(guildID, ci.Name, ids)
+
+		cmdID := s.bot.CommandIDByName(ci.Name)
+		if cmdID == "" {
+			continue
+		}
+		if err := syncCommandPermissions(c.Request.Context(), sess.AccessToken, s.cfg.ClientID, guildID, cmdID, ids); err != nil {
+			log.Printf("[web] sync slash-menu visibility for /%s in %s: %v", ci.Name, guildID, err)
+		}
 	}
 
 	// Save channel allow-lists: global + one per module.
