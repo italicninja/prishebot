@@ -13,14 +13,14 @@
 <div class="page page-wide">
   <div style="margin-bottom:1.5rem;">
     <div class="page-title">Your Servers</div>
-    <div class="page-sub">Select a server to manage Prishe. Only servers where you have Administrator permission are shown.</div>
+    <div class="page-sub">Servers where you have Administrator permission, or where an admin has granted you a dashboard-moderator role.</div>
   </div>
 
   {{ if not .Guilds }}
   <div class="empty">
     <div class="empty-icon">🏝️</div>
     <h2>No servers found</h2>
-    <p>You don't appear to be an administrator in any Discord servers.</p>
+    <p>You don't appear to be an administrator or moderator in any Discord servers where Prishe is installed.</p>
   </div>
   {{ else }}
   <div class="server-grid">
@@ -32,6 +32,9 @@
         <div class="server-icon-ph">{{ slice .Name 0 1 }}</div>
       {{ end }}
       <span class="server-name">{{ .Name }}</span>
+      {{ if eq .Role "moderator" }}
+        <span class="badge badge-muted">Moderator</span>
+      {{ end }}
       {{ if .BotPresent }}
         <span class="badge badge-green">Active</span>
       {{ else }}

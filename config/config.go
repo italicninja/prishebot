@@ -24,8 +24,9 @@ type Config struct {
 	BirthdayDataFile string // Path to birthday persistence file (default: birthdays.json)
 	RolesDataFile    string // Path to roles persistence file (default: roles.json)
 	RaidDataFile     string // Path to raid sign-up persistence file (default: raids.json)
-	CommandPermsFile string // Path to command role-lock persistence file (default: command-permissions.json)
-	ChannelPermsFile string // Path to channel allow-list persistence file (default: channel-permissions.json)
+	CommandPermsFile   string // Path to command role-lock persistence file (default: command-permissions.json)
+	ChannelPermsFile   string // Path to channel allow-list persistence file (default: channel-permissions.json)
+	ModeratorRolesFile string // Path to dashboard-moderator role persistence file (default: moderator-roles.json)
 	IconsDir         string // Directory where downloaded FF14 icons are stored
 	BaseURL          string // Public URL of the web server, used to build icon URLs (e.g. https://mybot.railway.app)
 }
@@ -55,8 +56,9 @@ func Load() *Config {
 		BirthdayDataFile: getOrDefault("BIRTHDAY_DATA_FILE", "birthdays.json"),
 		RolesDataFile:    getOrDefault("ROLES_DATA_FILE", "roles.json"),
 		RaidDataFile:     getOrDefault("RAID_DATA_FILE", "raids.json"),
-		CommandPermsFile: getOrDefault("COMMAND_PERMS_FILE", "command-permissions.json"),
-		ChannelPermsFile: getOrDefault("CHANNEL_PERMS_FILE", "channel-permissions.json"),
+		CommandPermsFile:   getOrDefault("COMMAND_PERMS_FILE", "command-permissions.json"),
+		ChannelPermsFile:   getOrDefault("CHANNEL_PERMS_FILE", "channel-permissions.json"),
+		ModeratorRolesFile: getOrDefault("MODERATOR_ROLES_FILE", "moderator-roles.json"),
 		IconsDir:         getOrDefault("ICONS_DIR", filepath.Join("web", "static", "icons", "ffxiv")),
 		BaseURL:          os.Getenv("BASE_URL"), // empty = icons not served; Discord embeds use emoji only
 	}

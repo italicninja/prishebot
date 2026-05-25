@@ -70,13 +70,11 @@ func fetchCurrentUser(ctx context.Context, token *oauth2.Token, cfg *oauth2.Conf
 	return &u, nil
 }
 
-// fetchAdminGuilds fetches the user's guild list and filters it to only the
-// servers where they have ADMINISTRATOR permission or are the server owner.
+// fetchUserGuilds returns the user's full guild list from Discord.
 //
-// Why filter client-side? Discord's /guilds endpoint returns partial guild
-// objects that include the user's computed permissions for that guild, so we
-// don't need separate permission lookups — we can check the bit directly.
-func fetchAdminGuilds(ctx context.Context, token *oauth2.Token, cfg *oauth2.Config) ([]discordGuild, error) {
+// The partial guild objects include the user's computed permissions for that
+// guild, so callers can check the admin bit directly without separate lookups.
+func fetchUserGuilds(ctx context.Context, token *oauth2.Token, cfg *oauth2.Config) ([]discordGuild, error) {
 	client := cfg.Client(ctx, token)
 	resp, err := client.Get(discordAPI + "/users/@me/guilds")
 	if err != nil {
@@ -93,14 +91,12 @@ func fetchAdminGuilds(ctx context.Context, token *oauth2.Token, cfg *oauth2.Conf
 	if err := json.Unmarshal(body, &all); err != nil {
 		return nil, fmt.Errorf("parsing guilds JSON: %w", err)
 	}
+	return all, nil
+}
 
-	var admin []discordGuild
-	for _, g := range all {
-		if g.Owner || hasAdminBit(g.Permissions) {
-			admin = append(admin, g)
-		}
-	}
-	return admin, nil
+// isAdminGuild reports whether the user is owner or has ADMINISTRATOR in g.
+func isAdminGuild(g discordGuild) bool {
+	return g.Owner || hasAdminBit(g.Permissions)
 }
 
 // hasAdminBit parses a Discord permissions decimal string and checks bit 3.

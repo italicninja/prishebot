@@ -46,6 +46,10 @@ type Bot struct {
 	// Empty allow-lists at every layer mean "all channels" — the default.
 	channelPerms *ChannelPermissions
 
+	// moderatorRoles tracks which Discord roles grant non-admin users access
+	// to the web dashboard. Edited from the server page by admins.
+	moderatorRoles *ModeratorRoles
+
 	startTime time.Time
 }
 
@@ -82,6 +86,7 @@ func New(cfg *config.Config) (*Bot, error) {
 		registeredCmds: make(map[string][]*discordgo.ApplicationCommand),
 		commandPerms:   NewCommandPermissions(cfg.CommandPermsFile),
 		channelPerms:   NewChannelPermissions(cfg.ChannelPermsFile),
+		moderatorRoles: NewModeratorRoles(cfg.ModeratorRolesFile),
 	}
 
 	// Register the single interaction handler. discordgo calls this for every
@@ -401,6 +406,11 @@ func (b *Bot) CommandPerms() *CommandPermissions { return b.commandPerms }
 // ChannelPerms exposes the channel-allow-list store so the web dashboard can
 // read and update per-guild settings.
 func (b *Bot) ChannelPerms() *ChannelPermissions { return b.channelPerms }
+
+// ModeratorRoles exposes the dashboard-moderator role store so the web layer
+// can read it (at login, to expand the guild list) and write it (from the
+// admin UI on the server page).
+func (b *Bot) ModeratorRoles() *ModeratorRoles { return b.moderatorRoles }
 
 // CommandInfo describes one registered top-level slash command for the web UI.
 type CommandInfo struct {

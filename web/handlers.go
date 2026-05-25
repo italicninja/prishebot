@@ -85,26 +85,54 @@ func (s *Server) handleCallback(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "Could not fetch user info.")
 		return
 	}
-	rawGuilds, err := fetchAdminGuilds(c.Request.Context(), token, s.oauth)
+	rawGuilds, err := fetchUserGuilds(c.Request.Context(), token, s.oauth)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Could not fetch guild list.")
 		return
 	}
 
-	// 4. Build the session guild list, marking which ones already have the bot.
+	// 4. Build the session guild list. Admins (or owners) are surfaced for
+	// every guild they share with the bot. Non-admins are surfaced for guilds
+	// where (a) the bot is present, (b) the admin has configured at least one
+	// dashboard-moderator role, and (c) the user holds one of those roles.
+	//
+	// We only look up GuildMember for guilds where moderator access could
+	// possibly apply — keeping the API-call count bounded for users in many
+	// servers.
 	botGuilds := make(map[string]bool)
 	for _, g := range s.bot.Session().State.Guilds {
 		botGuilds[g.ID] = true
 	}
+	modConfigured := s.bot.ModeratorRoles().GuildsConfigured()
 
 	var guilds []Guild
 	for _, g := range rawGuilds {
-		guilds = append(guilds, Guild{
-			ID:         g.ID,
-			Name:       g.Name,
-			IconURL:    guildIconURL(g.ID, g.Icon),
-			BotPresent: botGuilds[g.ID],
-		})
+		switch {
+		case isAdminGuild(g):
+			guilds = append(guilds, Guild{
+				ID:         g.ID,
+				Name:       g.Name,
+				IconURL:    guildIconURL(g.ID, g.Icon),
+				BotPresent: botGuilds[g.ID],
+				Role:       RoleAdmin,
+			})
+		case botGuilds[g.ID] && modConfigured[g.ID]:
+			mem, err := s.bot.Session().GuildMember(g.ID, user.ID)
+			if err != nil {
+				log.Printf("[web] GuildMember %s/%s: %v", g.ID, user.ID, err)
+				continue
+			}
+			if !s.bot.ModeratorRoles().HasAny(g.ID, mem.Roles) {
+				continue
+			}
+			guilds = append(guilds, Guild{
+				ID:         g.ID,
+				Name:       g.Name,
+				IconURL:    guildIconURL(g.ID, g.Icon),
+				BotPresent: true,
+				Role:       RoleModerator,
+			})
+		}
 	}
 
 	// 5. Create session and set the cookie.
@@ -147,15 +175,15 @@ func (s *Server) handleDashboard(c *gin.Context) {
 }
 
 // handleServerPage renders the management page for a single server.
-// It verifies that the logged-in user actually has admin in that server by
-// checking their session guild list — we never trust the URL parameter alone.
+// Open to both admins and moderators. The template hides the Danger Zone
+// and the moderator-role editor for non-admins; handleUpdateModules
+// re-checks the role before applying admin-only form fields.
 func (s *Server) handleServerPage(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
 
-	src := findGuild(sess.Guilds, guildID)
+	src := requireGuildAccess(c, sess, guildID, false)
 	if src == nil {
-		c.String(http.StatusForbidden, "You don't have admin access to that server.")
 		return
 	}
 	// Copy and refresh BotPresent from live bot state.
@@ -289,14 +317,16 @@ func (s *Server) handleServerPage(c *gin.Context) {
 	channelsJSON, _ := json.Marshal(channelOptions)
 
 	if err := s.tmpl.ExecuteTemplate(c.Writer, "server.html", gin.H{
-		"User":           sess,
-		"Guild":          &guild,
-		"Categories":     categories,
-		"GlobalChannels": chp.GetGlobal(guildID),
-		"RolesJSON":      template.JS(rolesJSON),
-		"ChannelsJSON":   template.JS(channelsJSON),
-		"Saved":          c.Query("saved") == "1",
-		"ClientID":       s.cfg.ClientID,
+		"User":            sess,
+		"Guild":           &guild,
+		"IsAdmin":         guild.Role == RoleAdmin,
+		"Categories":      categories,
+		"GlobalChannels":  chp.GetGlobal(guildID),
+		"ModeratorRoles":  s.bot.ModeratorRoles().Get(guildID),
+		"RolesJSON":       template.JS(rolesJSON),
+		"ChannelsJSON":    template.JS(channelsJSON),
+		"Saved":           c.Query("saved") == "1",
+		"ClientID":        s.cfg.ClientID,
 	}); err != nil {
 		log.Printf("[web] failed to render server.html: %v", err)
 		c.Status(http.StatusInternalServerError)
@@ -308,8 +338,7 @@ func (s *Server) handleLeaveServer(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
 
-	if findGuild(sess.Guilds, guildID) == nil {
-		c.String(http.StatusForbidden, "Access denied.")
+	if requireGuildAccess(c, sess, guildID, true) == nil {
 		return
 	}
 
@@ -330,8 +359,8 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
 
-	if findGuild(sess.Guilds, guildID) == nil {
-		c.String(http.StatusForbidden, "Access denied.")
+	g := requireGuildAccess(c, sess, guildID, false)
+	if g == nil {
 		return
 	}
 
@@ -371,6 +400,13 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 	chp.SetGlobal(guildID, cleanIDs(c.Request.PostForm["channels_global"]))
 	for name := range s.bot.Modules() {
 		chp.SetModule(guildID, name, cleanIDs(c.Request.PostForm["channels_module_"+name]))
+	}
+
+	// Save the dashboard-moderator role list. Admin-only: the field is hidden
+	// from moderators in the template, but a crafted form submission would
+	// still be rejected here.
+	if g.Role == RoleAdmin {
+		s.bot.ModeratorRoles().Set(guildID, cleanIDs(c.Request.PostForm["moderator_roles"]))
 	}
 
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"?saved=1")
@@ -413,6 +449,23 @@ func findGuild(guilds []Guild, id string) *Guild {
 	return nil
 }
 
+// requireGuildAccess resolves the session's entry for guildID and applies the
+// role gate. Returns nil after writing a 403 if access is denied. When
+// adminOnly is true, moderators are also rejected — use it on destructive
+// routes (leave-server, module enablement, edit moderator-role list).
+func requireGuildAccess(c *gin.Context, sess *Session, guildID string, adminOnly bool) *Guild {
+	g := findGuild(sess.Guilds, guildID)
+	if g == nil {
+		c.String(http.StatusForbidden, "You don't have access to that server.")
+		return nil
+	}
+	if adminOnly && g.Role != RoleAdmin {
+		c.String(http.StatusForbidden, "Admin access required.")
+		return nil
+	}
+	return g
+}
+
 // botGuildSet returns the set of guild IDs the bot is currently a member of,
 // read live from the session state so it's always up to date.
 func (s *Server) botGuildSet() map[string]bool {
@@ -429,9 +482,8 @@ func (s *Server) handleRolesPage(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
 
-	src := findGuild(sess.Guilds, guildID)
+	src := requireGuildAccess(c, sess, guildID, false)
 	if src == nil {
-		c.String(http.StatusForbidden, "You don't have admin access to that server.")
 		return
 	}
 	guild := *src
@@ -504,8 +556,7 @@ func (s *Server) handleAddRole(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
 
-	if findGuild(sess.Guilds, guildID) == nil {
-		c.String(http.StatusForbidden, "Access denied.")
+	if requireGuildAccess(c, sess, guildID, false) == nil {
 		return
 	}
 
@@ -576,8 +627,7 @@ func (s *Server) handleDeleteRole(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
 
-	if findGuild(sess.Guilds, guildID) == nil {
-		c.String(http.StatusForbidden, "Access denied.")
+	if requireGuildAccess(c, sess, guildID, false) == nil {
 		return
 	}
 
@@ -606,9 +656,8 @@ func (s *Server) handleBirthdaySettingsPage(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
 
-	src := findGuild(sess.Guilds, guildID)
+	src := requireGuildAccess(c, sess, guildID, false)
 	if src == nil {
-		c.String(http.StatusForbidden, "You don't have admin access to that server.")
 		return
 	}
 	guild := *src
@@ -713,8 +762,7 @@ func (s *Server) handleUpdateBirthdaySettings(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
 
-	if findGuild(sess.Guilds, guildID) == nil {
-		c.String(http.StatusForbidden, "Access denied.")
+	if requireGuildAccess(c, sess, guildID, false) == nil {
 		return
 	}
 
@@ -733,8 +781,7 @@ func (s *Server) handleUploadGIF(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
 
-	if findGuild(sess.Guilds, guildID) == nil {
-		c.String(http.StatusForbidden, "Access denied.")
+	if requireGuildAccess(c, sess, guildID, false) == nil {
 		return
 	}
 
@@ -792,8 +839,7 @@ func (s *Server) handleSendBirthdayWish(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
 
-	if findGuild(sess.Guilds, guildID) == nil {
-		c.String(http.StatusForbidden, "Access denied.")
+	if requireGuildAccess(c, sess, guildID, false) == nil {
 		return
 	}
 
@@ -825,8 +871,7 @@ func (s *Server) handleDeleteGIF(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
 
-	if findGuild(sess.Guilds, guildID) == nil {
-		c.String(http.StatusForbidden, "Access denied.")
+	if requireGuildAccess(c, sess, guildID, false) == nil {
 		return
 	}
 
@@ -871,9 +916,8 @@ func (s *Server) handleRaidsPage(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
 
-	src := findGuild(sess.Guilds, guildID)
+	src := requireGuildAccess(c, sess, guildID, false)
 	if src == nil {
-		c.String(http.StatusForbidden, "You don't have admin access to that server.")
 		return
 	}
 	guild := *src
@@ -930,8 +974,7 @@ func (s *Server) handleCloseRaidWeb(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
 
-	if findGuild(sess.Guilds, guildID) == nil {
-		c.String(http.StatusForbidden, "Access denied.")
+	if requireGuildAccess(c, sess, guildID, false) == nil {
 		return
 	}
 
@@ -951,8 +994,7 @@ func (s *Server) handleCreateRaidWeb(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
 
-	if findGuild(sess.Guilds, guildID) == nil {
-		c.String(http.StatusForbidden, "Access denied.")
+	if requireGuildAccess(c, sess, guildID, false) == nil {
 		return
 	}
 

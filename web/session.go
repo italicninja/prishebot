@@ -19,12 +19,21 @@ type Session struct {
 	ExpiresAt   time.Time
 }
 
+// Role is how the logged-in user reached a given guild on the dashboard:
+// "admin" (Discord ADMINISTRATOR / owner) or "moderator" (holds one of the
+// roles an admin has marked as a dashboard-moderator role).
+const (
+	RoleAdmin     = "admin"
+	RoleModerator = "moderator"
+)
+
 // Guild is a Discord server shown in the dashboard.
 type Guild struct {
 	ID         string
 	Name       string
 	IconURL    string
-	BotPresent bool // true if the bot is already a member of this server
+	BotPresent bool   // true if the bot is already a member of this server
+	Role       string // RoleAdmin or RoleModerator — how the user reached this guild
 }
 
 // SessionStore is an in-memory store for web sessions.

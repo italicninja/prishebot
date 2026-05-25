@@ -43,7 +43,9 @@
 
   <div class="tabs" role="tablist">
     <button class="tab active" role="tab" aria-selected="true"  data-tab="settings">Settings</button>
+    {{ if .IsAdmin }}
     <button class="tab tab-danger"  role="tab" aria-selected="false" data-tab="danger">Danger Zone</button>
+    {{ end }}
   </div>
 
   {{ if .Saved }}
@@ -68,6 +70,23 @@
              data-selected="{{ range $i, $id := .GlobalChannels }}{{ if $i }},{{ end }}{{ $id }}{{ end }}">
         </div>
       </div>
+
+      {{ if .IsAdmin }}
+      <!-- Dashboard moderators -->
+      <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.75rem;">Dashboard moderators</div>
+      <div class="card" style="margin-bottom:1.5rem;">
+        <p class="module-perms-help" style="margin:0 0 0.75rem;">
+          Members holding any of these roles can sign in and manage Prishe's settings for this server. Server admins always have access.
+        </p>
+        <div class="multiselect"
+             data-name="moderator_roles"
+             data-source="roles"
+             data-empty="Admins only"
+             data-add-label="+ Add role"
+             data-selected="{{ range $i, $id := .ModeratorRoles }}{{ if $i }},{{ end }}{{ $id }}{{ end }}">
+        </div>
+      </div>
+      {{ end }}
 
       {{ if not .Categories }}
       <div class="empty" style="padding:2.5rem 1rem;">
@@ -144,6 +163,7 @@
     </form>
   </div>
 
+  {{ if .IsAdmin }}
   <!-- Danger Zone tab -->
   <div id="tab-danger" class="tab-panel" role="tabpanel" hidden>
     <div class="danger-zone">
@@ -160,6 +180,7 @@
       </div>
     </div>
   </div>
+  {{ end }}
 
   {{ end }}
 </div>
