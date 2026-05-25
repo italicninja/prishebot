@@ -89,6 +89,10 @@ func New(cfg *config.Config) (*Bot, error) {
 		moderatorRoles: NewModeratorRoles(cfg.ModeratorRolesFile),
 	}
 
+	// Restore persisted per-guild module enable/disable state. Loaded before
+	// any other goroutines exist so no lock is needed.
+	b.loadModuleState()
+
 	// Register the single interaction handler. discordgo calls this for every
 	// slash command and component interaction. We then route internally.
 	session.AddHandler(b.handleInteraction)
@@ -240,13 +244,15 @@ func (b *Bot) Session() *discordgo.Session {
 
 // SetModuleEnabled enables or disables a module for a specific guild.
 // The web UI calls this when an admin toggles a module on the server page.
+// State is persisted to disk so toggles survive restarts.
 func (b *Bot) SetModuleEnabled(guildID, moduleName string, enabled bool) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.guildSettings[guildID] == nil {
 		b.guildSettings[guildID] = make(map[string]bool)
 	}
 	b.guildSettings[guildID][moduleName] = enabled
+	b.mu.Unlock()
+	b.saveModuleState()
 }
 
 // IsModuleEnabled reports whether a module is enabled for a guild.

@@ -20,15 +20,24 @@ type Config struct {
 	Port          string // HTTP server port
 	SecretKey     string // Used to sign session cookies
 	SecureCookies bool   // Set true in production (requires HTTPS)
-	GIFsDir          string // Directory where per-server birthday GIFs are stored (default: gifs)
-	BirthdayDataFile string // Path to birthday persistence file (default: birthdays.json)
-	RolesDataFile    string // Path to roles persistence file (default: roles.json)
-	RaidDataFile     string // Path to raid sign-up persistence file (default: raids.json)
-	CommandPermsFile   string // Path to command role-lock persistence file (default: command-permissions.json)
-	ChannelPermsFile   string // Path to channel allow-list persistence file (default: channel-permissions.json)
-	ModeratorRolesFile string // Path to dashboard-moderator role persistence file (default: moderator-roles.json)
-	IconsDir         string // Directory where downloaded FF14 icons are stored
-	BaseURL          string // Public URL of the web server, used to build icon URLs (e.g. https://mybot.railway.app)
+
+	// StorageDir is the base directory for every runtime data file the bot
+	// writes. Set this to a mounted persistent volume in production so role
+	// allow-lists, birthdays, raids, etc. survive redeploys. Defaults to
+	// /data — matches Railway/Fly conventions; override per-file via the
+	// individual *_FILE / *_DIR env vars when you need finer control.
+	StorageDir string
+
+	GIFsDir            string // Directory where per-server birthday GIFs are stored
+	BirthdayDataFile   string // Path to birthday persistence file
+	RolesDataFile      string // Path to roles persistence file
+	RaidDataFile       string // Path to raid sign-up persistence file
+	CommandPermsFile   string // Path to command role-lock persistence file
+	ChannelPermsFile   string // Path to channel allow-list persistence file
+	ModeratorRolesFile string // Path to dashboard-moderator role persistence file
+	ModuleStateFile    string // Path to per-guild module enable/disable persistence file
+	IconsDir           string // Directory where downloaded FF14 icons are stored
+	BaseURL            string // Public URL of the web server, used to build icon URLs (e.g. https://mybot.railway.app)
 }
 
 // Load reads config from a .env file (if present) and then from environment
@@ -44,6 +53,25 @@ func Load() *Config {
 		}
 	}
 
+	// Resolve the storage base. Default /data matches the standard mount
+	// point for a Railway/Fly volume. We create it eagerly so the first
+	// write doesn't trip on a missing directory — a failure here is logged
+	// but not fatal, because individual *_FILE overrides might point
+	// elsewhere and still work.
+	storageDir := getOrDefault("STORAGE_DIR", "/data")
+	if err := os.MkdirAll(storageDir, 0755); err != nil {
+		log.Printf("warning: could not create storage dir %q: %v — per-file writes may fail unless you override each *_FILE env var", storageDir, err)
+	}
+
+	// dataPath returns the explicit env override if set, otherwise a path
+	// under StorageDir. Keeps the per-file overrides backward-compatible.
+	dataPath := func(envKey, filename string) string {
+		if v := os.Getenv(envKey); v != "" {
+			return v
+		}
+		return filepath.Join(storageDir, filename)
+	}
+
 	return &Config{
 		BotToken:      mustGet("DISCORD_BOT_TOKEN"),
 		ClientID:      mustGet("DISCORD_CLIENT_ID"),
@@ -52,15 +80,18 @@ func Load() *Config {
 		Port:          getOrDefault("PORT", "8080"),
 		SecretKey:     loadSecretKey(),
 		SecureCookies: os.Getenv("SECURE_COOKIES") == "true",
-		GIFsDir:          getOrDefault("GIFS_DIR", "gifs"),
-		BirthdayDataFile: getOrDefault("BIRTHDAY_DATA_FILE", "birthdays.json"),
-		RolesDataFile:    getOrDefault("ROLES_DATA_FILE", "roles.json"),
-		RaidDataFile:     getOrDefault("RAID_DATA_FILE", "raids.json"),
-		CommandPermsFile:   getOrDefault("COMMAND_PERMS_FILE", "command-permissions.json"),
-		ChannelPermsFile:   getOrDefault("CHANNEL_PERMS_FILE", "channel-permissions.json"),
-		ModeratorRolesFile: getOrDefault("MODERATOR_ROLES_FILE", "moderator-roles.json"),
-		IconsDir:         getOrDefault("ICONS_DIR", filepath.Join("web", "static", "icons", "ffxiv")),
-		BaseURL:          os.Getenv("BASE_URL"), // empty = icons not served; Discord embeds use emoji only
+
+		StorageDir:         storageDir,
+		GIFsDir:            dataPath("GIFS_DIR", "gifs"),
+		BirthdayDataFile:   dataPath("BIRTHDAY_DATA_FILE", "birthdays.json"),
+		RolesDataFile:      dataPath("ROLES_DATA_FILE", "roles.json"),
+		RaidDataFile:       dataPath("RAID_DATA_FILE", "raids.json"),
+		CommandPermsFile:   dataPath("COMMAND_PERMS_FILE", "command-permissions.json"),
+		ChannelPermsFile:   dataPath("CHANNEL_PERMS_FILE", "channel-permissions.json"),
+		ModeratorRolesFile: dataPath("MODERATOR_ROLES_FILE", "moderator-roles.json"),
+		ModuleStateFile:    dataPath("MODULE_STATE_FILE", "module-state.json"),
+		IconsDir:           getOrDefault("ICONS_DIR", filepath.Join("web", "static", "icons", "ffxiv")),
+		BaseURL:            os.Getenv("BASE_URL"), // empty = icons not served; Discord embeds use emoji only
 	}
 }
 
