@@ -1,0 +1,135 @@
+name: Discord Changelog
+
+# Posts a release announcement to a Discord channel via webhook.
+#
+# Triggers:
+#   - A GitHub release is published (uses the release body as the changelog)
+#   - Manual run via the Actions tab (defaults to the latest release; pass a
+#     tag to announce a specific one)
+#
+# Required secret:
+#   DISCORD_WEBHOOK_URL  - Channel webhook URL from Discord (Server Settings →
+#                          Integrations → Webhooks → New Webhook → Copy URL)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to announce (defaults to the latest release)"
+        required: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need full history so we can diff from the previous tag
+
+      - name: Resolve release info
+        id: rel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "release" ]; then
+            TAG=$(jq -r '.release.tag_name'  "$GITHUB_EVENT_PATH")
+            NAME=$(jq -r '.release.name'     "$GITHUB_EVENT_PATH")
+            BODY=$(jq -r '.release.body'     "$GITHUB_EVENT_PATH")
+            URL=$(jq  -r '.release.html_url' "$GITHUB_EVENT_PATH")
+          else
+            TAG="${INPUT_TAG:-$(gh release view --json tagName -q .tagName)}"
+            view=$(gh release view "$TAG" --json name,body,url)
+            NAME=$(echo "$view" | jq -r .name)
+            BODY=$(echo "$view" | jq -r .body)
+            URL=$(echo  "$view" | jq -r .url)
+          fi
+
+          # Fall back to "commits since previous tag" when the release body is empty.
+          if [ -z "$BODY" ] || [ "$BODY" = "null" ]; then
+            PREV=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+            if [ -n "$PREV" ]; then
+              BODY=$(git log --pretty=format:'- %s (%h)' "${PREV}..${TAG}")
+            else
+              BODY=$(git log --pretty=format:'- %s (%h)' "$TAG")
+            fi
+          fi
+
+          HASH=$(git rev-parse --short "$TAG")
+
+          # Discord embed description maxes out at 4096 chars — leave headroom.
+          if [ "${#BODY}" -gt 4000 ]; then
+            BODY="${BODY:0:4000}…"
+          fi
+
+          {
+            echo "tag=$TAG"
+            echo "hash=$HASH"
+            echo "url=$URL"
+            echo "name=${NAME:-$TAG}"
+          } >> "$GITHUB_OUTPUT"
+
+          # Multiline outputs use a random delimiter to survive arbitrary content.
+          delim="EOF_$(openssl rand -hex 8)"
+          {
+            echo "body<<$delim"
+            echo "$BODY"
+            echo "$delim"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post to Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TAG:   ${{ steps.rel.outputs.tag }}
+          HASH:  ${{ steps.rel.outputs.hash }}
+          URL:   ${{ steps.rel.outputs.url }}
+          NAME:  ${{ steps.rel.outputs.name }}
+          BODY:  ${{ steps.rel.outputs.body }}
+          REPO:  ${{ github.repository }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$WEBHOOK" ]; then
+            echo "::error::DISCORD_WEBHOOK_URL secret is not set. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+          # 0x9B59B6 (Discord-friendly purple) — change the color int if you prefer.
+          payload=$(jq -n \
+            --arg title    "🚀 $NAME" \
+            --arg desc     "$BODY" \
+            --arg url      "$URL" \
+            --arg hash     "$HASH" \
+            --arg tag      "$TAG" \
+            --arg repo     "$REPO" \
+            --arg repoUrl  "$REPO_URL" \
+            --arg compare  "${REPO_URL}/releases/tag/${TAG}" \
+            --arg ts       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+              username: "Prishe Releases",
+              embeds: [{
+                title: $title,
+                url: (if $url == "" or $url == "null" then $compare else $url end),
+                description: $desc,
+                color: 10181046,
+                fields: [
+                  { name: "Tag",    value: ("`" + $tag  + "`"), inline: true },
+                  { name: "Commit", value: ("`" + $hash + "`"), inline: true }
+                ],
+                author: { name: $repo, url: $repoUrl },
+                footer: { text: "GitHub Release" },
+                timestamp: $ts
+              }]
+            }')
+
+          curl -fsS -H "Content-Type: application/json" \
+            -X POST -d "$payload" "$WEBHOOK"
