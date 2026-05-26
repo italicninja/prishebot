@@ -343,29 +343,44 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 		return
 	}
 
-	enabled := make(map[string]bool)
+	// ── BEFORE-state snapshot ────────────────────────────────────────────
+	// Capture everything that could change before we mutate any store, so we
+	// can emit a precise audit-log diff after the save.
+	cp := s.bot.CommandPerms()
+	chp := s.bot.ChannelPerms()
+	known := s.bot.Modules()
+
+	beforeModules := s.bot.GuildModuleSettings(guildID)
+	beforeCmdRoles := cp.GuildSettings(guildID)
+	beforeChGlobal := chp.GetGlobal(guildID)
+	beforeChModule := make(map[string][]string, len(known))
+	for name := range known {
+		beforeChModule[name] = chp.GetModule(guildID, name)
+	}
+	var beforeModRoles []string
+	if g.Role == RoleAdmin {
+		beforeModRoles = s.bot.ModeratorRoles().Get(guildID)
+	}
+	var beforeAuditChan string
+	if g.IsOwner {
+		beforeAuditChan = s.bot.AuditChannels().Get(guildID)
+	}
+
+	// ── Apply: module toggles ─────────────────────────────────────────────
+	enabledForm := make(map[string]bool)
 	for key := range c.Request.Form {
 		if name, ok := strings.CutPrefix(key, "module_"); ok {
-			enabled[name] = true
+			enabledForm[name] = true
 		}
 	}
-
-	// Only iterate known modules so form data can't set arbitrary module names.
-	for name := range s.bot.Modules() {
-		s.bot.SetModuleEnabled(guildID, name, enabled[name])
+	afterModules := make(map[string]bool, len(known))
+	for name := range known {
+		afterModules[name] = enabledForm[name] // false when missing
+		s.bot.SetModuleEnabled(guildID, name, afterModules[name])
 	}
 
-	// Save per-command role-lock selections. Iterate the registered command
-	// list (not raw form keys) so a malicious form can't set role-locks on
-	// commands that don't exist.
-	//
-	// After saving each list, push the same overrides to Discord so the slash
-	// menu's visibility matches the dashboard. We do this with the admin's
-	// own OAuth token (the endpoint requires a user token with the
-	// applications.commands.permissions.update scope — see discord_perms.go).
-	// Failures are logged but don't fail the save: the dashboard is still the
-	// source of truth for runtime enforcement.
-	cp := s.bot.CommandPerms()
+	// ── Apply: per-command role allow-lists + push to Discord ─────────────
+	afterCmdRoles := make(map[string][]string)
 	var syncErrors, syncUnauthorized int
 	for _, ci := range s.bot.RegisteredCommands() {
 		var ids []string
@@ -375,6 +390,7 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 			}
 		}
 		cp.SetRoles(guildID, ci.Name, ids)
+		afterCmdRoles[ci.Name] = ids
 
 		cmdID := s.bot.CommandIDByName(ci.Name)
 		if cmdID == "" {
@@ -389,31 +405,49 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 		}
 	}
 
-	// Save channel allow-lists: global + one per module.
-	chp := s.bot.ChannelPerms()
-	chp.SetGlobal(guildID, cleanIDs(c.Request.PostForm["channels_global"]))
-	for name := range s.bot.Modules() {
-		chp.SetModule(guildID, name, cleanIDs(c.Request.PostForm["channels_module_"+name]))
+	// ── Apply: channel allow-lists ────────────────────────────────────────
+	afterChGlobal := cleanIDs(c.Request.PostForm["channels_global"])
+	chp.SetGlobal(guildID, afterChGlobal)
+	afterChModule := make(map[string][]string, len(known))
+	for name := range known {
+		afterChModule[name] = cleanIDs(c.Request.PostForm["channels_module_"+name])
+		chp.SetModule(guildID, name, afterChModule[name])
 	}
 
-	// Save the dashboard-moderator role list. Admin-only: the field is hidden
-	// from moderators in the template, but a crafted form submission would
-	// still be rejected here.
+	// ── Apply: moderator roles (admin-only) ───────────────────────────────
+	var afterModRoles []string
 	if g.Role == RoleAdmin {
-		s.bot.ModeratorRoles().Set(guildID, cleanIDs(c.Request.PostForm["moderator_roles"]))
+		afterModRoles = cleanIDs(c.Request.PostForm["moderator_roles"])
+		s.bot.ModeratorRoles().Set(guildID, afterModRoles)
 	}
 
-	// Save the audit channel. Owner-only: the field is hidden from non-owner
-	// admins and moderators, but a crafted form would still be rejected here.
+	// ── Apply: audit channel (owner-only) ─────────────────────────────────
+	var afterAuditChan string
 	if g.IsOwner {
-		s.bot.AuditChannels().Set(guildID, strings.TrimSpace(c.Request.PostForm.Get("audit_channel")))
+		afterAuditChan = strings.TrimSpace(c.Request.PostForm.Get("audit_channel"))
+		s.bot.AuditChannels().Set(guildID, afterAuditChan)
 	}
 
-	// Audit-log the change. We post after every successful save so the
-	// channel sees one embed per dashboard edit — sufficient signal without
-	// flooding (each Save covers modules + perms + channels at once).
-	s.postAudit(guildID, sess, "Server settings updated",
-		"Module toggles, command-role allow-lists, and channel allow-lists were saved from the dashboard.")
+	// ── Audit ─────────────────────────────────────────────────────────────
+	diff := buildModuleSaveDiff(moduleSaveDiffInput{
+		BeforeModules:    beforeModules,
+		AfterModules:     afterModules,
+		BeforeCmdRoles:   beforeCmdRoles,
+		AfterCmdRoles:    afterCmdRoles,
+		BeforeChGlobal:   beforeChGlobal,
+		AfterChGlobal:    afterChGlobal,
+		BeforeChModule:   beforeChModule,
+		AfterChModule:    afterChModule,
+		ShowModRoles:     g.Role == RoleAdmin,
+		BeforeModRoles:   beforeModRoles,
+		AfterModRoles:    afterModRoles,
+		ShowAuditChannel: g.IsOwner,
+		BeforeAuditChan:  beforeAuditChan,
+		AfterAuditChan:   afterAuditChan,
+	})
+	if diff != "" {
+		s.postAudit(guildID, sess, "Server settings updated", diff)
+	}
 
 	// Pass any sync warning forward so the dashboard can show a banner. The
 	// dashboard config is already saved at this point — we just want the
@@ -727,8 +761,12 @@ func (s *Server) handleAddRole(c *gin.Context) {
 		}
 	}
 
+	source_label := "existing"
+	if source == "new" {
+		source_label = "new role created"
+	}
 	s.postAudit(guildID, sess, "Self-assignable role added",
-		"Added role **"+roleName+"** (`"+roleID+"`) to the self-assignable list.")
+		"Added <@&"+roleID+"> **"+roleName+"** to the self-assignable list ("+source_label+").")
 
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/roles")
 }
@@ -744,14 +782,27 @@ func (s *Server) handleDeleteRole(c *gin.Context) {
 	}
 
 	roleID := c.Param("roleID")
+	// Look up the friendly name BEFORE removing so the audit message can
+	// show it instead of the bare ID.
+	var removedName string
 	if mod, ok := s.bot.Modules()["roles"]; ok {
 		if rm, ok := mod.(*roles.Module); ok {
+			for _, r := range rm.GuildRoles(guildID) {
+				if r.RoleID == roleID {
+					removedName = r.Name
+					break
+				}
+			}
 			rm.RemoveRole(guildID, roleID)
 		}
 	}
 
+	suffix := ""
+	if removedName != "" {
+		suffix = " **" + removedName + "**"
+	}
 	s.postAudit(guildID, sess, "Self-assignable role removed",
-		"Removed role `"+roleID+"` from the self-assignable list.")
+		"Removed <@&"+roleID+">"+suffix+" from the self-assignable list.")
 
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/roles")
 }
@@ -881,15 +932,41 @@ func (s *Server) handleUpdateBirthdaySettings(c *gin.Context) {
 		return
 	}
 
+	newCh := strings.TrimSpace(c.PostForm("channel_id"))
+	newGIFs := c.PostForm("gifs_enabled") == "1"
+	var beforeCh string
+	var beforeGIFs bool
 	if mod, ok := s.bot.Modules()["birthday"]; ok {
 		if bm, ok := mod.(*birthday.Module); ok {
-			bm.SetAnnouncementChannel(guildID, strings.TrimSpace(c.PostForm("channel_id")))
-			bm.SetGIFsEnabled(guildID, c.PostForm("gifs_enabled") == "1")
+			beforeCh = bm.AnnouncementChannel(guildID)
+			beforeGIFs = bm.GIFsEnabled(guildID)
+			bm.SetAnnouncementChannel(guildID, newCh)
+			bm.SetGIFsEnabled(guildID, newGIFs)
 		}
 	}
 
-	s.postAudit(guildID, sess, "Birthday settings updated",
-		"Announcement channel and GIF-enabled toggle were saved.")
+	// Emit only the fields that actually changed.
+	var lines []string
+	if beforeCh != newCh {
+		switch {
+		case beforeCh == "":
+			lines = append(lines, "• Announcement channel: set to <#"+newCh+">")
+		case newCh == "":
+			lines = append(lines, "• Announcement channel: cleared (was <#"+beforeCh+">)")
+		default:
+			lines = append(lines, "• Announcement channel: <#"+beforeCh+"> → <#"+newCh+">")
+		}
+	}
+	if beforeGIFs != newGIFs {
+		from, to := "disabled", "enabled"
+		if beforeGIFs {
+			from, to = "enabled", "disabled"
+		}
+		lines = append(lines, "• GIFs: "+from+" → "+to)
+	}
+	if len(lines) > 0 {
+		s.postAudit(guildID, sess, "Birthday settings updated", strings.Join(lines, "\n"))
+	}
 
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?saved=1")
 }

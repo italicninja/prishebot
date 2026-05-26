@@ -37,7 +37,16 @@ func (s *Server) postAudit(guildID string, sess *Session, action, summary string
 		},
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-	if _, err := s.bot.Session().ChannelMessageSendEmbed(channelID, embed); err != nil {
+	// Suppress pings — the diff description embeds <@&roleID> / <#channelID>
+	// references for readability, and we don't want every save to ping
+	// everyone in those roles. Empty Parse means "no mention types are
+	// allowed to ping" without disabling mention rendering itself.
+	if _, err := s.bot.Session().ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+		Embeds: []*discordgo.MessageEmbed{embed},
+		AllowedMentions: &discordgo.MessageAllowedMentions{
+			Parse: []discordgo.AllowedMentionType{},
+		},
+	}); err != nil {
 		log.Printf("[audit] post to %s in guild %s: %v", channelID, guildID, err)
 	}
 }
