@@ -27,6 +27,10 @@
     var emptyLabel  = root.dataset.empty || 'None selected';
     var addLabel    = root.dataset.addLabel || '+ Add';
     var initial     = (root.dataset.selected || '').split(',').filter(Boolean);
+    // data-max="1" turns the control into a single-select: picking a new
+    // option replaces the existing one and the popup closes immediately.
+    // 0 / unset = unlimited.
+    var max         = parseInt(root.dataset.max || '0', 10);
 
     var options = optionsFor(source);
     var byID = {};
@@ -122,11 +126,21 @@
           var lbl = document.createElement('span'); lbl.textContent = o.name;
           li.appendChild(lbl);
           li.addEventListener('click', function () {
-            selected.push(o.id);
+            // Single-select mode: replace the existing selection rather than append.
+            if (max === 1) {
+              selected = [o.id];
+              root.classList.remove('open');
+            } else if (max > 0 && selected.length >= max) {
+              return; // limit reached for multi-select with a cap > 1
+            } else {
+              selected.push(o.id);
+            }
             filter.value = '';
             render();
-            // Keep focus in the popup so admins can add several in a row.
-            filter.focus();
+            // Keep focus in the popup for unbounded multi-select so admins can
+            // add several in a row. In single-select mode we closed the popup
+            // above, so focus the add button instead.
+            if (max === 1) addBtn.focus(); else filter.focus();
           });
           li.addEventListener('keydown', function (e) {
             if (e.key === 'Enter' || e.key === ' ') {
