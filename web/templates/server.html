@@ -52,6 +52,26 @@
   <div class="banner banner-success" style="margin-bottom:1rem;">Settings saved.</div>
   {{ end }}
 
+  {{ if .Resynced }}
+  <div class="banner banner-success" style="margin-bottom:1rem;">Re-pushed slash-menu visibility for {{ .Resynced }} command(s) to Discord.</div>
+  {{ end }}
+
+  {{ if eq .SyncWarn "unauthorized" }}
+  <div class="banner banner-error" style="margin-bottom:1rem;">
+    <strong>Discord-side slash menu wasn't updated.</strong>
+    Your sign-in is missing the <code>applications.commands.permissions.update</code> scope —
+    this happens for sessions created before the feature was added.
+    <a href="/logout">Log out</a>, sign back in, then click <strong>Resync slash menu</strong> below.
+    Dashboard settings are still saved; the bot will enforce the allow-list at runtime regardless.
+  </div>
+  {{ else if eq .SyncWarn "error" }}
+  <div class="banner banner-error" style="margin-bottom:1rem;">
+    <strong>Couldn't update Discord-side slash menu visibility.</strong>
+    Check the bot logs for <code>[web] sync slash-menu visibility</code>.
+    Dashboard settings are still saved; the bot will enforce the allow-list at runtime regardless.
+  </div>
+  {{ end }}
+
   <!-- Settings tab -->
   <div id="tab-settings" class="tab-panel" role="tabpanel">
     <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/modules">
@@ -161,6 +181,21 @@
       </div>
       {{ end }}
     </form>
+
+    {{ if .IsAdmin }}
+    <!-- Separate from the main form so it doesn't carry the role/channel fields. -->
+    <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/resync" style="margin-top:1.5rem;">
+      <details class="module-perms">
+        <summary>Discord slash-menu sync</summary>
+        <p class="module-perms-help">
+          Re-pushes the saved command role allow-lists to Discord. Use this if you re-authenticated
+          and need to apply the existing config without changing anything, or if a previous save
+          showed a sync warning.
+        </p>
+        <button type="submit" class="btn btn-ghost btn-sm">Resync slash menu</button>
+      </details>
+    </form>
+    {{ end }}
   </div>
 
   {{ if .IsAdmin }}

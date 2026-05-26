@@ -105,6 +105,7 @@ func (s *Server) routes() *gin.Engine {
 		dash.GET("", s.handleDashboard)
 		dash.GET("/server/:id", s.handleServerPage)
 		dash.POST("/server/:id/modules", s.handleUpdateModules)
+		dash.POST("/server/:id/resync", s.handleResyncCommandPerms)
 		dash.POST("/server/:id/leave", s.handleLeaveServer)
 		dash.GET("/server/:id/roles", s.handleRolesPage)
 		dash.POST("/server/:id/roles", s.handleAddRole)

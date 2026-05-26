@@ -317,16 +317,18 @@ func (s *Server) handleServerPage(c *gin.Context) {
 	channelsJSON, _ := json.Marshal(channelOptions)
 
 	if err := s.tmpl.ExecuteTemplate(c.Writer, "server.html", gin.H{
-		"User":            sess,
-		"Guild":           &guild,
-		"IsAdmin":         guild.Role == RoleAdmin,
-		"Categories":      categories,
-		"GlobalChannels":  chp.GetGlobal(guildID),
-		"ModeratorRoles":  s.bot.ModeratorRoles().Get(guildID),
-		"RolesJSON":       template.JS(rolesJSON),
-		"ChannelsJSON":    template.JS(channelsJSON),
-		"Saved":           c.Query("saved") == "1",
-		"ClientID":        s.cfg.ClientID,
+		"User":           sess,
+		"Guild":          &guild,
+		"IsAdmin":        guild.Role == RoleAdmin,
+		"Categories":     categories,
+		"GlobalChannels": chp.GetGlobal(guildID),
+		"ModeratorRoles": s.bot.ModeratorRoles().Get(guildID),
+		"RolesJSON":      template.JS(rolesJSON),
+		"ChannelsJSON":   template.JS(channelsJSON),
+		"Saved":          c.Query("saved") == "1",
+		"SyncWarn":       c.Query("sync_warn"),
+		"Resynced":       c.Query("resync"),
+		"ClientID":       s.cfg.ClientID,
 	}); err != nil {
 		log.Printf("[web] failed to render server.html: %v", err)
 		c.Status(http.StatusInternalServerError)
@@ -392,6 +394,7 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 	// Failures are logged but don't fail the save: the dashboard is still the
 	// source of truth for runtime enforcement.
 	cp := s.bot.CommandPerms()
+	var syncErrors, syncUnauthorized int
 	for _, ci := range s.bot.RegisteredCommands() {
 		var ids []string
 		for _, id := range c.Request.PostForm["roles_"+ci.Name] {
@@ -407,6 +410,10 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 		}
 		if err := syncCommandPermissions(c.Request.Context(), sess.AccessToken, s.cfg.ClientID, guildID, cmdID, ids); err != nil {
 			log.Printf("[web] sync slash-menu visibility for /%s in %s: %v", ci.Name, guildID, err)
+			syncErrors++
+			if strings.Contains(err.Error(), "401") {
+				syncUnauthorized++
+			}
 		}
 	}
 
@@ -424,7 +431,61 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 		s.bot.ModeratorRoles().Set(guildID, cleanIDs(c.Request.PostForm["moderator_roles"]))
 	}
 
-	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"?saved=1")
+	// Pass any sync warning forward so the dashboard can show a banner. The
+	// dashboard config is already saved at this point — we just want the
+	// admin to know that Discord-side slash menu visibility may not match
+	// what they see in the UI.
+	redirect := "/dashboard/server/" + guildID + "?saved=1"
+	if syncUnauthorized > 0 {
+		redirect += "&sync_warn=unauthorized"
+	} else if syncErrors > 0 {
+		redirect += "&sync_warn=error"
+	}
+	c.Redirect(http.StatusFound, redirect)
+}
+
+// handleResyncCommandPerms re-pushes the saved role allow-list for every
+// registered command to Discord, without touching the local config. Use this
+// after re-authenticating (so the session has the
+// applications.commands.permissions.update scope) to fix divergence between
+// what the dashboard shows and what Discord's slash menu enforces.
+//
+// Admin-only: same trust boundary as handleUpdateModules — pushing overrides
+// to Discord requires ManageGuild and the per-guild config is admin-owned.
+func (s *Server) handleResyncCommandPerms(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	if requireGuildAccess(c, sess, guildID, true) == nil {
+		return
+	}
+
+	cp := s.bot.CommandPerms()
+	var ok, failed, unauthorized int
+	for _, ci := range s.bot.RegisteredCommands() {
+		cmdID := s.bot.CommandIDByName(ci.Name)
+		if cmdID == "" {
+			continue
+		}
+		ids := cp.GetRoles(guildID, ci.Name)
+		if err := syncCommandPermissions(c.Request.Context(), sess.AccessToken, s.cfg.ClientID, guildID, cmdID, ids); err != nil {
+			log.Printf("[web] resync /%s in %s: %v", ci.Name, guildID, err)
+			failed++
+			if strings.Contains(err.Error(), "401") {
+				unauthorized++
+			}
+			continue
+		}
+		ok++
+	}
+
+	redirect := "/dashboard/server/" + guildID + "?resync=" + strconv.Itoa(ok)
+	if unauthorized > 0 {
+		redirect += "&sync_warn=unauthorized"
+	} else if failed > 0 {
+		redirect += "&sync_warn=error"
+	}
+	c.Redirect(http.StatusFound, redirect)
 }
 
 // cleanIDs trims and drops empty values from a form-submitted slice of IDs.
