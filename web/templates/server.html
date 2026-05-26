@@ -184,17 +184,16 @@
 
     {{ if .IsAdmin }}
     <!-- Separate from the main form so it doesn't carry the role/channel fields. -->
-    <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/resync" style="margin-top:1.5rem;">
-      <details class="module-perms">
-        <summary>Discord slash-menu sync</summary>
-        <p class="module-perms-help">
-          Re-pushes the saved command role allow-lists to Discord. Use this if you re-authenticated
-          and need to apply the existing config without changing anything, or if a previous save
-          showed a sync warning.
-        </p>
-        <button type="submit" class="btn btn-ghost btn-sm">Resync slash menu</button>
-      </details>
-    </form>
+    <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:2rem 0 0.75rem;">Discord slash-menu sync</div>
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+      <p class="module-perms-help" style="margin:0;flex:1;min-width:18rem;">
+        Re-pushes the saved command role allow-lists to Discord so the slash menu matches the dashboard.
+        Useful right after re-authenticating, or if a previous save showed a sync warning.
+      </p>
+      <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/resync" style="margin:0;">
+        <button type="submit" class="btn btn-primary btn-sm">Resync slash menu</button>
+      </form>
+    </div>
     {{ end }}
   </div>
 
