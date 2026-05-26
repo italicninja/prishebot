@@ -108,6 +108,22 @@
       </div>
       {{ end }}
 
+      {{ if .IsOwner }}
+      <!-- Audit channel (owner-only) -->
+      <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.75rem;">Audit channel <span class="muted">· owner-only</span></div>
+      <div class="card" style="margin-bottom:1.5rem;">
+        <p class="module-perms-help" style="margin:0 0 0.75rem;">
+          Pick a channel for an embed posting every time anyone changes settings via the dashboard. Leave on <em>Disabled</em> to skip auditing.
+        </p>
+        <select name="audit_channel" class="select">
+          <option value=""{{ if eq .AuditChannelID "" }} selected{{ end }}>Disabled — no audit posts</option>
+          {{ range .AllChannels }}
+          <option value="{{ .ID }}"{{ if eq $.AuditChannelID .ID }} selected{{ end }}>{{ .Name }}</option>
+          {{ end }}
+        </select>
+      </div>
+      {{ end }}
+
       {{ if not .Categories }}
       <div class="empty" style="padding:2.5rem 1rem;">
         <div class="empty-icon">📦</div>

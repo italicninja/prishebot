@@ -54,6 +54,11 @@ type Bot struct {
 	// to the web dashboard. Edited from the server page by admins.
 	moderatorRoles *ModeratorRoles
 
+	// auditChannels maps a guild ID to the channel that should receive an
+	// embed every time a config change is made via the dashboard. Owner-
+	// configured; empty entries disable auditing for that guild.
+	auditChannels *AuditChannels
+
 	startTime time.Time
 }
 
@@ -91,6 +96,7 @@ func New(cfg *config.Config) (*Bot, error) {
 		commandPerms:   NewCommandPermissions(cfg.CommandPermsFile),
 		channelPerms:   NewChannelPermissions(cfg.ChannelPermsFile),
 		moderatorRoles: NewModeratorRoles(cfg.ModeratorRolesFile),
+		auditChannels:  NewAuditChannels(cfg.AuditChannelsFile),
 	}
 
 	// Restore persisted per-guild module enable/disable state. Loaded before
@@ -468,6 +474,11 @@ func (b *Bot) ChannelPerms() *ChannelPermissions { return b.channelPerms }
 // can read it (at login, to expand the guild list) and write it (from the
 // admin UI on the server page).
 func (b *Bot) ModeratorRoles() *ModeratorRoles { return b.moderatorRoles }
+
+// AuditChannels exposes the audit-channel store so the web layer can read it
+// (when deciding whether to post an audit embed) and write it (from the
+// owner UI on the server page).
+func (b *Bot) AuditChannels() *AuditChannels { return b.auditChannels }
 
 // CommandInfo describes one registered top-level slash command for the web UI.
 type CommandInfo struct {

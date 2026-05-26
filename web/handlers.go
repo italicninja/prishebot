@@ -284,9 +284,12 @@ func (s *Server) handleServerPage(c *gin.Context) {
 		"User":           sess,
 		"Guild":          &guild,
 		"IsAdmin":        guild.Role == RoleAdmin,
+		"IsOwner":        guild.IsOwner,
 		"Categories":     categories,
 		"GlobalChannels": chp.GetGlobal(guildID),
 		"ModeratorRoles": s.bot.ModeratorRoles().Get(guildID),
+		"AuditChannelID": s.bot.AuditChannels().Get(guildID),
+		"AllChannels":    channelOptions,
 		"RolesJSON":      template.JS(rolesJSON),
 		"ChannelsJSON":   template.JS(channelsJSON),
 		"Saved":          c.Query("saved") == "1",
@@ -307,6 +310,11 @@ func (s *Server) handleLeaveServer(c *gin.Context) {
 	if requireGuildAccess(c, sess, guildID, true) == nil {
 		return
 	}
+
+	// Post the audit log BEFORE leaving — the channel send needs the bot to
+	// still be a member of the guild.
+	s.postAudit(guildID, sess, "Bot removed from server",
+		"The dashboard owner triggered the bot to leave this server. Future settings changes will not be possible until the bot is re-invited.")
 
 	if err := s.bot.Session().GuildLeave(guildID); err != nil {
 		log.Printf("[web] failed to leave guild %s: %v", guildID, err)
@@ -395,6 +403,18 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 		s.bot.ModeratorRoles().Set(guildID, cleanIDs(c.Request.PostForm["moderator_roles"]))
 	}
 
+	// Save the audit channel. Owner-only: the field is hidden from non-owner
+	// admins and moderators, but a crafted form would still be rejected here.
+	if g.IsOwner {
+		s.bot.AuditChannels().Set(guildID, strings.TrimSpace(c.Request.PostForm.Get("audit_channel")))
+	}
+
+	// Audit-log the change. We post after every successful save so the
+	// channel sees one embed per dashboard edit — sufficient signal without
+	// flooding (each Save covers modules + perms + channels at once).
+	s.postAudit(guildID, sess, "Server settings updated",
+		"Module toggles, command-role allow-lists, and channel allow-lists were saved from the dashboard.")
+
 	// Pass any sync warning forward so the dashboard can show a banner. The
 	// dashboard config is already saved at this point — we just want the
 	// admin to know that Discord-side slash menu visibility may not match
@@ -442,6 +462,9 @@ func (s *Server) handleResyncCommandPerms(c *gin.Context) {
 		}
 		ok++
 	}
+
+	s.postAudit(guildID, sess, "Slash-menu permissions resynced",
+		"Re-pushed the saved command role allow-lists to Discord — "+strconv.Itoa(ok)+" command(s) succeeded, "+strconv.Itoa(failed)+" failed.")
 
 	redirect := "/dashboard/server/" + guildID + "?resync=" + strconv.Itoa(ok)
 	if unauthorized > 0 {
@@ -540,6 +563,7 @@ func (s *Server) buildVisibleGuilds(raw []discordGuild, userID string) []Guild {
 				IconURL:    guildIconURL(g.ID, g.Icon),
 				BotPresent: botGuilds[g.ID],
 				Role:       RoleAdmin,
+				IsOwner:    g.Owner,
 			})
 		case botGuilds[g.ID] && modConfigured[g.ID]:
 			mem, err := s.bot.Session().GuildMember(g.ID, userID)
@@ -703,6 +727,9 @@ func (s *Server) handleAddRole(c *gin.Context) {
 		}
 	}
 
+	s.postAudit(guildID, sess, "Self-assignable role added",
+		"Added role **"+roleName+"** (`"+roleID+"`) to the self-assignable list.")
+
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/roles")
 }
 
@@ -722,6 +749,9 @@ func (s *Server) handleDeleteRole(c *gin.Context) {
 			rm.RemoveRole(guildID, roleID)
 		}
 	}
+
+	s.postAudit(guildID, sess, "Self-assignable role removed",
+		"Removed role `"+roleID+"` from the self-assignable list.")
 
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/roles")
 }
@@ -858,6 +888,9 @@ func (s *Server) handleUpdateBirthdaySettings(c *gin.Context) {
 		}
 	}
 
+	s.postAudit(guildID, sess, "Birthday settings updated",
+		"Announcement channel and GIF-enabled toggle were saved.")
+
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?saved=1")
 }
 
@@ -913,6 +946,9 @@ func (s *Server) handleUploadGIF(c *gin.Context) {
 		return
 	}
 
+	s.postAudit(guildID, sess, "Birthday GIF uploaded",
+		"Added **"+safeName+"** to the birthday GIF library.")
+
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?saved=1")
 }
 
@@ -967,6 +1003,10 @@ func (s *Server) handleDeleteGIF(c *gin.Context) {
 	}
 
 	_ = os.Remove(filepath.Join(s.cfg.GIFsDir, guildID, safeName))
+
+	s.postAudit(guildID, sess, "Birthday GIF removed",
+		"Removed **"+safeName+"** from the birthday GIF library.")
+
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/birthday?saved=1")
 }
 

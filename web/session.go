@@ -44,6 +44,7 @@ type Guild struct {
 	IconURL    string
 	BotPresent bool   // true if the bot is already a member of this server
 	Role       string // RoleAdmin or RoleModerator — how the user reached this guild
+	IsOwner    bool   // true if this user is the Discord server owner (strictly stronger than admin)
 }
 
 // SessionStore is an in-memory store for web sessions.

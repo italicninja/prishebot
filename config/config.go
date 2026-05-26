@@ -36,6 +36,7 @@ type Config struct {
 	ChannelPermsFile   string // Path to channel allow-list persistence file
 	ModeratorRolesFile string // Path to dashboard-moderator role persistence file
 	ModuleStateFile    string // Path to per-guild module enable/disable persistence file
+	AuditChannelsFile  string // Path to per-guild audit-log channel persistence file
 	IconsDir           string // Directory where downloaded FF14 icons are stored
 	BaseURL            string // Public URL of the web server, used to build icon URLs (e.g. https://mybot.railway.app)
 
@@ -96,6 +97,7 @@ func Load() *Config {
 		ChannelPermsFile:   dataPath("CHANNEL_PERMS_FILE", "channel-permissions.json"),
 		ModeratorRolesFile: dataPath("MODERATOR_ROLES_FILE", "moderator-roles.json"),
 		ModuleStateFile:    dataPath("MODULE_STATE_FILE", "module-state.json"),
+		AuditChannelsFile:  dataPath("AUDIT_CHANNELS_FILE", "audit-channels.json"),
 		IconsDir:           getOrDefault("ICONS_DIR", filepath.Join("web", "static", "icons", "ffxiv")),
 		BaseURL:            os.Getenv("BASE_URL"), // empty = icons not served; Discord embeds use emoji only
 
