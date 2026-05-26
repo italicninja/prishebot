@@ -15,8 +15,18 @@ type Session struct {
 	Username    string
 	AvatarURL   string
 	AccessToken string  // Discord OAuth2 token (used for future API calls)
-	Guilds      []Guild // Servers where this user has admin permissions
-	ExpiresAt   time.Time
+	Guilds      []Guild // Visible servers — REBUILT from RawGuilds on each /dashboard render
+
+	// RawGuilds is the unfiltered partial-guild list Discord returned for this
+	// user (/users/@me/guilds). We keep it so we can rebuild Guilds on every
+	// dashboard render: if the bot wasn't connected when the session was
+	// created — Railway healthcheck starts the web server before the bot
+	// finishes module load — the original computation would silently drop
+	// moderator-eligible guilds. Rebuilding fixes that as soon as the bot
+	// catches up, with no re-login needed.
+	RawGuilds []discordGuild
+
+	ExpiresAt time.Time
 }
 
 // Role is how the logged-in user reached a given guild on the dashboard:
@@ -57,7 +67,7 @@ func NewSessionStore() *SessionStore {
 }
 
 // Create stores a new session and returns it.
-func (s *SessionStore) Create(userID, username, avatarURL, accessToken string, guilds []Guild) *Session {
+func (s *SessionStore) Create(userID, username, avatarURL, accessToken string, raw []discordGuild, guilds []Guild) *Session {
 	sess := &Session{
 		ID:          uuid.New().String(),
 		UserID:      userID,
@@ -65,6 +75,7 @@ func (s *SessionStore) Create(userID, username, avatarURL, accessToken string, g
 		AvatarURL:   avatarURL,
 		AccessToken: accessToken,
 		Guilds:      guilds,
+		RawGuilds:   raw,
 		ExpiresAt:   time.Now().Add(24 * time.Hour),
 	}
 	s.mu.Lock()

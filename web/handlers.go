@@ -91,52 +91,14 @@ func (s *Server) handleCallback(c *gin.Context) {
 		return
 	}
 
-	// 4. Build the session guild list. Admins (or owners) are surfaced for
-	// every guild they share with the bot. Non-admins are surfaced for guilds
-	// where (a) the bot is present, (b) the admin has configured at least one
-	// dashboard-moderator role, and (c) the user holds one of those roles.
-	//
-	// We only look up GuildMember for guilds where moderator access could
-	// possibly apply — keeping the API-call count bounded for users in many
-	// servers.
-	botGuilds := make(map[string]bool)
-	for _, g := range s.bot.Session().State.Guilds {
-		botGuilds[g.ID] = true
-	}
-	modConfigured := s.bot.ModeratorRoles().GuildsConfigured()
-
-	var guilds []Guild
-	for _, g := range rawGuilds {
-		switch {
-		case isAdminGuild(g):
-			guilds = append(guilds, Guild{
-				ID:         g.ID,
-				Name:       g.Name,
-				IconURL:    guildIconURL(g.ID, g.Icon),
-				BotPresent: botGuilds[g.ID],
-				Role:       RoleAdmin,
-			})
-		case botGuilds[g.ID] && modConfigured[g.ID]:
-			mem, err := s.bot.Session().GuildMember(g.ID, user.ID)
-			if err != nil {
-				log.Printf("[web] GuildMember %s/%s: %v", g.ID, user.ID, err)
-				continue
-			}
-			if !s.bot.ModeratorRoles().HasAny(g.ID, mem.Roles) {
-				continue
-			}
-			guilds = append(guilds, Guild{
-				ID:         g.ID,
-				Name:       g.Name,
-				IconURL:    guildIconURL(g.ID, g.Icon),
-				BotPresent: true,
-				Role:       RoleModerator,
-			})
-		}
-	}
+	// 4. Derive the visible guild list from the raw list. Stored in session
+	// AND on rebuild during every /dashboard render — keeps things working
+	// if the bot wasn't connected at OAuth time (Railway healthcheck starts
+	// the web server before module load finishes).
+	guilds := s.buildVisibleGuilds(rawGuilds, user.ID)
 
 	// 5. Create session and set the cookie.
-	sess := s.store.Create(user.ID, user.Username, userAvatarURL(user.ID, user.Avatar), token.AccessToken, guilds)
+	sess := s.store.Create(user.ID, user.Username, userAvatarURL(user.ID, user.Avatar), token.AccessToken, rawGuilds, guilds)
 	// MaxAge=86400 = 24 hours in seconds
 	c.SetCookie("session_id", sess.ID, 86400, "/", "", s.cfg.SecureCookies, true)
 	c.Redirect(http.StatusFound, "/dashboard")
@@ -155,13 +117,15 @@ func (s *Server) handleLogout(c *gin.Context) {
 
 func (s *Server) handleDashboard(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
-	botSet := s.botGuildSet()
-	// Refresh BotPresent from live bot state — session data is stale after join/leave.
-	guilds := make([]Guild, len(sess.Guilds))
-	for i, g := range sess.Guilds {
-		guilds[i] = g
-		guilds[i].BotPresent = botSet[g.ID]
+	// Recompute from the raw guild list against the *current* bot state.
+	// If the bot wasn't ready when the user logged in (Railway boots web
+	// first, then modules, then the gateway), the initial Guilds list will
+	// have been missing moderator entries and showed admin entries as
+	// "Not added"; this catches up as soon as the bot is up.
+	if sess.RawGuilds != nil {
+		sess.Guilds = s.buildVisibleGuilds(sess.RawGuilds, sess.UserID)
 	}
+	guilds := sess.Guilds
 	sort.SliceStable(guilds, func(i, j int) bool {
 		return guilds[i].BotPresent && !guilds[j].BotPresent
 	})
@@ -551,6 +515,51 @@ func (s *Server) botGuildSet() map[string]bool {
 		set[g.ID] = true
 	}
 	return set
+}
+
+// buildVisibleGuilds turns a raw /users/@me/guilds payload into the dashboard
+// guild list, applying the same admin / moderator rules used at login time
+// but against live bot state. Called at OAuth callback AND on every
+// /dashboard render — recomputing each time keeps the list correct when the
+// bot wasn't ready at login or has since reconnected/joined/left a guild.
+//
+// For non-admin guilds, this issues one GuildMember API call per moderator-
+// configured guild the user is in. That's bounded (only guilds where an
+// admin has set up moderator roles) and only runs on the /dashboard handler.
+func (s *Server) buildVisibleGuilds(raw []discordGuild, userID string) []Guild {
+	botGuilds := s.botGuildSet()
+	modConfigured := s.bot.ModeratorRoles().GuildsConfigured()
+
+	out := make([]Guild, 0, len(raw))
+	for _, g := range raw {
+		switch {
+		case isAdminGuild(g):
+			out = append(out, Guild{
+				ID:         g.ID,
+				Name:       g.Name,
+				IconURL:    guildIconURL(g.ID, g.Icon),
+				BotPresent: botGuilds[g.ID],
+				Role:       RoleAdmin,
+			})
+		case botGuilds[g.ID] && modConfigured[g.ID]:
+			mem, err := s.bot.Session().GuildMember(g.ID, userID)
+			if err != nil {
+				log.Printf("[web] GuildMember %s/%s: %v", g.ID, userID, err)
+				continue
+			}
+			if !s.bot.ModeratorRoles().HasAny(g.ID, mem.Roles) {
+				continue
+			}
+			out = append(out, Guild{
+				ID:         g.ID,
+				Name:       g.Name,
+				IconURL:    guildIconURL(g.ID, g.Icon),
+				BotPresent: true,
+				Role:       RoleModerator,
+			})
+		}
+	}
+	return out
 }
 
 // handleRolesPage renders the admin page for managing self-assignable roles.
