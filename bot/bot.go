@@ -1,8 +1,12 @@
 package bot
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -125,15 +129,46 @@ func (b *Bot) Start() error {
 // bot's Discord application profile so the "About Me" stays in sync with
 // what's deployed. Failures are logged but non-fatal — the bot is fully
 // usable without an updated profile description.
+//
+// Why not session.ApplicationUpdate? That helper hits PATCH /applications/{id},
+// which Discord rejects for bot tokens with 403 "Bots cannot use this endpoint".
+// The bot-accessible endpoint is PATCH /applications/@me, which discordgo
+// v0.29 doesn't wrap — so we make a direct HTTP call with bot auth.
 func (b *Bot) applyBotDescription() {
 	if b.cfg.BotDescription == "" {
 		return
 	}
-	if _, err := b.session.ApplicationUpdate(b.cfg.ClientID, &discordgo.Application{
-		Description: b.cfg.BotDescription,
-	}); err != nil {
-		log.Printf("[bot] failed to update application description: %v", err)
+
+	payload, err := json.Marshal(struct {
+		Description string `json:"description"`
+	}{Description: b.cfg.BotDescription})
+	if err != nil {
+		log.Printf("[bot] marshal description: %v", err)
+		return
 	}
+
+	req, err := http.NewRequest(http.MethodPatch, "https://discord.com/api/v10/applications/@me", bytes.NewReader(payload))
+	if err != nil {
+		log.Printf("[bot] build description request: %v", err)
+		return
+	}
+	req.Header.Set("Authorization", "Bot "+b.cfg.BotToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[bot] update application description: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		log.Printf("[bot] update application description: HTTP %d: %s", resp.StatusCode, body)
+		return
+	}
+	log.Println("[bot] updated application description (about me)")
 }
 
 // setOnlinePresence sets a static "online since MM/DD/YY HH:MM:SS" activity.

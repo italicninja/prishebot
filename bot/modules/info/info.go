@@ -1,11 +1,13 @@
-// Package info provides /serverinfo and /botinfo slash commands.
-// On load it also pushes all bot stats into the application's "About Me"
-// description via PATCH /applications/@me so they appear on Prishe's
-// Discord profile card.
+// Package info provides /serverinfo, /botinfo, and /modules slash commands.
+//
+// The bot's "About Me" description is owned by Bot.applyBotDescription
+// (configured via BOT_DESCRIPTION). This module used to also push stats into
+// the description on load, but that endpoint required an owner token and
+// always failed for bots — the call was removed in favour of the single
+// canonical updater.
 package info
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -81,11 +83,7 @@ func (m *Module) HandleInteraction(s *discordgo.Session, i *discordgo.Interactio
 	}
 }
 
-func (m *Module) OnLoad(s *discordgo.Session) error {
-	// Update the application description (shown as "About Me" on Prishe's
-	// Discord profile) with the key stats. This is a plain HTTP call so it
-	// works before the WebSocket is opened.
-	m.updateBio(s)
+func (m *Module) OnLoad(_ *discordgo.Session) error {
 	log.Println("[info] module loaded")
 	return nil
 }
@@ -93,35 +91,6 @@ func (m *Module) OnLoad(s *discordgo.Session) error {
 func (m *Module) OnUnload(_ *discordgo.Session) error {
 	log.Println("[info] module unloaded")
 	return nil
-}
-
-// updateBio pushes stats into the application description via the Discord API.
-// Errors are logged but not fatal — the bio is cosmetic.
-func (m *Module) updateBio(s *discordgo.Session) {
-	var lines []string
-	lines = append(lines, "Online since "+m.startTime.UTC().Format("01/02/06 15:04:05 UTC"))
-	lines = append(lines, "ID: "+m.appID)
-	if env := os.Getenv("RAILWAY_ENVIRONMENT_NAME"); env != "" {
-		lines = append(lines, "Environment: "+env)
-	}
-	if region := os.Getenv("RAILWAY_REPLICA_REGION"); region != "" {
-		lines = append(lines, "Region: "+region)
-	}
-	if svc := os.Getenv("RAILWAY_SERVICE_NAME"); svc != "" {
-		lines = append(lines, "Service: "+svc)
-	}
-
-	type appPatch struct {
-		Description string `json:"description"`
-	}
-	body, _ := json.Marshal(appPatch{Description: strings.Join(lines, "\n")})
-
-	endpoint := discordgo.EndpointApplication(m.appID)
-	if _, err := s.RequestWithBucketID("PATCH", endpoint, body, endpoint); err != nil {
-		log.Printf("[info] could not update application description: %v", err)
-	} else {
-		log.Println("[info] updated application description (bio)")
-	}
 }
 
 // ── Slash commands ─────────────────────────────────────────────────────────
