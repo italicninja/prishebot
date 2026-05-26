@@ -117,7 +117,23 @@ func (b *Bot) Start() error {
 		log.Println("[bot] connected")
 	}
 	b.setOnlinePresence()
+	b.applyBotDescription()
 	return nil
+}
+
+// applyBotDescription pushes BotDescription (env BOT_DESCRIPTION) to the
+// bot's Discord application profile so the "About Me" stays in sync with
+// what's deployed. Failures are logged but non-fatal — the bot is fully
+// usable without an updated profile description.
+func (b *Bot) applyBotDescription() {
+	if b.cfg.BotDescription == "" {
+		return
+	}
+	if _, err := b.session.ApplicationUpdate(b.cfg.ClientID, &discordgo.Application{
+		Description: b.cfg.BotDescription,
+	}); err != nil {
+		log.Printf("[bot] failed to update application description: %v", err)
+	}
 }
 
 // setOnlinePresence sets a static "online since MM/DD/YY HH:MM:SS" activity.

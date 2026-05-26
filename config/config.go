@@ -38,6 +38,12 @@ type Config struct {
 	ModuleStateFile    string // Path to per-guild module enable/disable persistence file
 	IconsDir           string // Directory where downloaded FF14 icons are stored
 	BaseURL            string // Public URL of the web server, used to build icon URLs (e.g. https://mybot.railway.app)
+
+	// BotDescription is the "About Me" text that appears on the bot's Discord
+	// profile. Applied via the Application API on every start so it stays in
+	// sync with what's deployed — useful for displaying environment hints
+	// (e.g. dev vs prod) right on the profile card.
+	BotDescription string
 }
 
 // Load reads config from a .env file (if present) and then from environment
@@ -92,6 +98,8 @@ func Load() *Config {
 		ModuleStateFile:    dataPath("MODULE_STATE_FILE", "module-state.json"),
 		IconsDir:           getOrDefault("ICONS_DIR", filepath.Join("web", "static", "icons", "ffxiv")),
 		BaseURL:            os.Getenv("BASE_URL"), // empty = icons not served; Discord embeds use emoji only
+
+		BotDescription: getOrDefault("BOT_DESCRIPTION", "I'm currently in development, bear with me :3"),
 	}
 }
 
