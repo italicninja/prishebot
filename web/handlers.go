@@ -1307,10 +1307,15 @@ func (s *Server) handleUpdateRaidPingRole(c *gin.Context) {
 	}
 
 	// Field is wired through the chip multi-select with data-max="1" —
-	// PostForm.Get returns "" when no role is picked, which clears the
-	// setting (i.e. disables raid pings for this guild).
+	// c.PostForm returns the empty string when no role is picked, which
+	// clears the setting (i.e. disables raid pings for this guild).
+	//
+	// We use c.PostForm here (Gin's helper) rather than c.Request.PostForm
+	// because the latter is nil until ParseForm runs, and silently returning
+	// "" from a nil url.Values is how the previous version of this handler
+	// always-cleared the role on save.
 	before := rm.PingRoleID(guildID)
-	after := strings.TrimSpace(c.Request.PostForm.Get("raid_ping_role"))
+	after := strings.TrimSpace(c.PostForm("raid_ping_role"))
 	rm.SetPingRoleID(guildID, after)
 
 	if before != after {
