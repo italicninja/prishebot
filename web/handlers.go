@@ -1126,9 +1126,11 @@ func (s *Server) handleRaidsPage(c *gin.Context) {
 	guild.BotPresent = s.botGuildSet()[guildID]
 
 	var raids []raid.RaidView
+	var pingRoleID string
 	if mod, ok := s.bot.Modules()["raid"]; ok {
 		if rm, ok := mod.(*raid.Module); ok {
 			raids = rm.GuildRaids(guildID)
+			pingRoleID = rm.PingRoleID(guildID)
 		}
 	}
 
@@ -1157,14 +1159,64 @@ func (s *Server) handleRaidsPage(c *gin.Context) {
 		}
 	}
 
+	// Role picker for the ping-role admin section. JSON-encoded for the
+	// chip multi-select widget (window.PRISHE_ROLES) — same shape used on
+	// the server page.
+	type RoleOption struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		ColorHex string `json:"color"`
+	}
+	var roleOptions []RoleOption
+	if guild.BotPresent {
+		if discordRoles, err := s.bot.Session().GuildRoles(guildID); err == nil {
+			for _, r := range discordRoles {
+				if r.Managed || r.ID == guildID { // skip integration-managed and @everyone
+					continue
+				}
+				roleOptions = append(roleOptions, RoleOption{
+					ID: r.ID, Name: r.Name, ColorHex: roleColorHex(r.Color),
+				})
+			}
+			sort.SliceStable(roleOptions, func(i, j int) bool {
+				return strings.ToLower(roleOptions[i].Name) < strings.ToLower(roleOptions[j].Name)
+			})
+		}
+	}
+	rolesJSON, _ := json.Marshal(roleOptions)
+
+	// Resolve the configured role's friendly name (and colour) so the
+	// create-raid form can label the "Ping role on create" checkbox with the
+	// actual role instead of a bare ID. Falls back to the ID when the role
+	// can't be found (deleted? bot lacks GuildRoles access?).
+	var pingRoleName, pingRoleColor string
+	if pingRoleID != "" {
+		for _, r := range roleOptions {
+			if r.ID == pingRoleID {
+				pingRoleName = r.Name
+				pingRoleColor = r.ColorHex
+				break
+			}
+		}
+		if pingRoleName == "" {
+			pingRoleName = pingRoleID
+		}
+	}
+
 	if err := s.tmpl.ExecuteTemplate(c.Writer, "raids.html", gin.H{
-		"User":      sess,
-		"Guild":     &guild,
-		"Raids":     raids,
-		"RaidsJSON": template.JS(raidsJSON),
-		"Channels":  channels,
-		"Created":   c.Query("created") == "1",
-		"ErrMsg":    c.Query("error"),
+		"User":          sess,
+		"Guild":         &guild,
+		"IsAdmin":       guild.Role == RoleAdmin,
+		"Raids":         raids,
+		"RaidsJSON":     template.JS(raidsJSON),
+		"Channels":      channels,
+		"RolesJSON":     template.JS(rolesJSON),
+		"PingRoleID":    pingRoleID,
+		"PingRoleName":  pingRoleName,
+		"PingRoleColor": pingRoleColor,
+		"PingSaved":     c.Query("ping_saved") == "1",
+		"Created":       c.Query("created") == "1",
+		"ErrMsg":        c.Query("error"),
 	}); err != nil {
 		log.Printf("[web] raids template error: %v", err)
 		c.Status(http.StatusInternalServerError)
@@ -1220,9 +1272,14 @@ func (s *Server) handleCreateRaidWeb(c *gin.Context) {
 		}
 	}
 
+	// "Ping role on create" checkbox. Form field is absent when unchecked,
+	// "1" when checked. The module no-ops the ping if no role is configured,
+	// so it's safe to pass through whatever the form said.
+	pingRole := c.PostForm("ping_role") == "1"
+
 	if mod, ok := s.bot.Modules()["raid"]; ok {
 		if rm, ok := mod.(*raid.Module); ok {
-			if err := rm.CreateRaidFromWeb(s.bot.Session(), guildID, channelID, title, description, unixTime); err != nil {
+			if err := rm.CreateRaidFromWeb(s.bot.Session(), guildID, channelID, title, description, unixTime, pingRole); err != nil {
 				log.Printf("[web] CreateRaidFromWeb: %v", err)
 				c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids?error=post_failed")
 				return
@@ -1231,6 +1288,45 @@ func (s *Server) handleCreateRaidWeb(c *gin.Context) {
 	}
 
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids?created=1")
+}
+
+// handleUpdateRaidPingRole stores the per-guild raid ping role. Admin-only —
+// the same trust level as the rest of the role-permission UI.
+func (s *Server) handleUpdateRaidPingRole(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	if requireGuildAccess(c, sess, guildID, true) == nil {
+		return
+	}
+
+	rm, ok := s.bot.Modules()["raid"].(*raid.Module)
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids?error=raid_unavailable")
+		return
+	}
+
+	// Field is wired through the chip multi-select with data-max="1" —
+	// PostForm.Get returns "" when no role is picked, which clears the
+	// setting (i.e. disables raid pings for this guild).
+	before := rm.PingRoleID(guildID)
+	after := strings.TrimSpace(c.Request.PostForm.Get("raid_ping_role"))
+	rm.SetPingRoleID(guildID, after)
+
+	if before != after {
+		var line string
+		switch {
+		case before == "":
+			line = "Set to <@&" + after + ">"
+		case after == "":
+			line = "Cleared (was <@&" + before + ">) — raid pings disabled"
+		default:
+			line = "<@&" + before + "> → <@&" + after + ">"
+		}
+		s.postAudit(guildID, sess, "Raid ping role updated", line)
+	}
+
+	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids?ping_saved=1")
 }
 
 // memberAvatarURL returns the best available avatar URL for a guild member.

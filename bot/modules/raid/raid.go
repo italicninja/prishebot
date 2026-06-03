@@ -205,6 +205,11 @@ type Module struct {
 	mu       sync.Mutex
 	raids    map[string]*Raid
 
+	// pingRoles[guildID] is the role ID admins can opt to ping when posting a
+	// new raid. Empty entry = no ping role configured. Stored alongside
+	// raids in the same data file for atomic persistence.
+	pingRoles map[string]string
+
 	// roleEmoji and jobEmoji are populated synchronously in OnLoad then never
 	// modified again, so they are safe to read from interaction handlers without mu.
 	roleEmoji map[string]*discordgo.ComponentEmoji // role key -> app emoji
@@ -220,7 +225,32 @@ const (
 )
 
 func New(dataFile, appID string) *Module {
-	return &Module{dataFile: dataFile, appID: appID, raids: make(map[string]*Raid)}
+	return &Module{
+		dataFile:  dataFile,
+		appID:     appID,
+		raids:     make(map[string]*Raid),
+		pingRoles: make(map[string]string),
+	}
+}
+
+// PingRoleID returns the configured "post-new-raid" ping role for a guild,
+// or "" if none has been set.
+func (m *Module) PingRoleID(guildID string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.pingRoles[guildID]
+}
+
+// SetPingRoleID stores (or clears, when roleID == "") the ping role for a guild.
+func (m *Module) SetPingRoleID(guildID, roleID string) {
+	m.mu.Lock()
+	if roleID == "" {
+		delete(m.pingRoles, guildID)
+	} else {
+		m.pingRoles[guildID] = roleID
+	}
+	m.mu.Unlock()
+	m.save()
 }
 
 func (m *Module) Name() string          { return "raid" }
@@ -1255,10 +1285,21 @@ func (m *Module) buildComponents(raid *Raid) []discordgo.MessageComponent {
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 
+// persistedData wraps the on-disk shape. Older files stored only a
+// map[string]*Raid at the top level; load() falls back to that shape when
+// the wrapped version fails to parse, so a fresh deploy doesn't lose data.
+type persistedData struct {
+	Raids     map[string]*Raid  `json:"raids"`
+	PingRoles map[string]string `json:"ping_roles,omitempty"`
+}
+
 func (m *Module) save() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	data, err := json.MarshalIndent(m.raids, "", "  ")
+	data, err := json.MarshalIndent(persistedData{
+		Raids:     m.raids,
+		PingRoles: m.pingRoles,
+	}, "", "  ")
 	if err != nil {
 		log.Printf("[raid] marshal error: %v", err)
 		return
@@ -1278,6 +1319,18 @@ func (m *Module) load() {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Try the new wrapped shape first.
+	var pd persistedData
+	if err := json.Unmarshal(raw, &pd); err == nil && pd.Raids != nil {
+		m.raids = pd.Raids
+		if pd.PingRoles != nil {
+			m.pingRoles = pd.PingRoles
+		}
+		return
+	}
+
+	// Fallback: legacy flat map[string]*Raid (no ping_roles key).
 	if err := json.Unmarshal(raw, &m.raids); err != nil {
 		log.Printf("[raid] parse %s error: %v", m.dataFile, err)
 	}
@@ -1464,7 +1517,12 @@ func buildRaidView(r *Raid) RaidView {
 
 // CreateRaidFromWeb posts a new raid embed to a Discord channel and persists it.
 // This is the web-dashboard equivalent of the /raid create slash command.
-func (m *Module) CreateRaidFromWeb(s *discordgo.Session, guildID, channelID, title, description string, unixTime int64) error {
+//
+// When pingRole is true AND a per-guild ping role is configured via
+// SetPingRoleID, the message content is "<@&roleID>" with the matching
+// AllowedMentions.Roles list so the ping actually fires. Without a
+// configured role the flag is a no-op (we never invent a role to ping).
+func (m *Module) CreateRaidFromWeb(s *discordgo.Session, guildID, channelID, title, description string, unixTime int64, pingRole bool) error {
 	id := newID()
 	r := &Raid{
 		ID:          id,
@@ -1476,10 +1534,22 @@ func (m *Module) CreateRaidFromWeb(s *discordgo.Session, guildID, channelID, tit
 		Slots:       newSlots(),
 	}
 
-	msg, err := s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+	send := &discordgo.MessageSend{
 		Embeds:     []*discordgo.MessageEmbed{m.buildEmbed(r)},
 		Components: m.buildComponents(r),
-	})
+	}
+	if pingRole {
+		if roleID := m.PingRoleID(guildID); roleID != "" {
+			send.Content = "<@&" + roleID + ">"
+			// Restrict the ping to exactly this role — Discord's default
+			// would otherwise allow every mention in the payload to fire.
+			send.AllowedMentions = &discordgo.MessageAllowedMentions{
+				Roles: []string{roleID},
+			}
+		}
+	}
+
+	msg, err := s.ChannelMessageSendComplex(channelID, send)
 	if err != nil {
 		return fmt.Errorf("could not post raid embed to channel: %w", err)
 	}

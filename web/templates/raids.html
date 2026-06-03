@@ -31,13 +31,38 @@
   {{ if .Created }}
   <div class="banner banner-success">Raid created and posted to Discord.</div>
   {{ end }}
+  {{ if .PingSaved }}
+  <div class="banner banner-success">Raid ping role saved.</div>
+  {{ end }}
   {{ if .ErrMsg }}
   <div class="banner banner-error">
     {{ if eq .ErrMsg "title_required" }}Title is required.
     {{ else if eq .ErrMsg "channel_required" }}Please select a channel.
     {{ else if eq .ErrMsg "post_failed" }}Could not post to Discord — make sure Prishe has permission to send messages in that channel.
+    {{ else if eq .ErrMsg "raid_unavailable" }}The raid module isn't loaded.
     {{ else }}Something went wrong. Please try again.
     {{ end }}
+  </div>
+  {{ end }}
+
+  {{ if and .IsAdmin .Guild.BotPresent }}
+  <!-- Raid ping role (admin-only) -->
+  <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:0 0 0.75rem;">Raid ping role <span class="muted">· admin-only</span></div>
+  <div class="card" style="margin-bottom:1.5rem;">
+    <p class="module-perms-help" style="margin:0 0 0.75rem;">
+      Pick a role to mention when posting a new raid. When set, the create-raid form below shows a "Ping role on create" checkbox. Clear to disable.
+    </p>
+    <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/raids/ping-role" style="display:flex;gap:0.75rem;align-items:flex-end;flex-wrap:wrap;">
+      <div class="multiselect" style="flex:1;min-width:18rem;"
+           data-name="raid_ping_role"
+           data-source="roles"
+           data-max="1"
+           data-empty="No role — pings disabled"
+           data-add-label="+ Pick role"
+           data-selected="{{ .PingRoleID }}">
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Save</button>
+    </form>
   </div>
   {{ end }}
 
@@ -203,6 +228,20 @@
         </select>
       </div>
 
+      {{ if .PingRoleID }}
+      <div class="form-field" style="display:flex;align-items:center;gap:0.5rem;">
+        <input type="checkbox" name="ping_role" id="raid-ping" value="1">
+        <label for="raid-ping" style="margin:0;display:inline-flex;align-items:center;gap:0.4rem;">
+          Ping
+          <span class="ms-pill" style="--ms-color: {{ .PingRoleColor }};">
+            {{ if .PingRoleColor }}<span class="ms-dot" style="background: {{ .PingRoleColor }};"></span>{{ end }}
+            <span>{{ .PingRoleName }}</span>
+          </span>
+          when posting
+        </label>
+      </div>
+      {{ end }}
+
       <div class="form-actions">
         <button type="submit" class="btn btn-primary">Create &amp; Post</button>
         <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
@@ -214,6 +253,9 @@
 </div>
 
 <script>
+// Source list for the chip multi-select (role picker in the admin section).
+window.PRISHE_ROLES = {{ .RolesJSON }};
+
 // ── Raid data for calendar ──────────────────────────────────────────────────
 var RAIDS = {{ .RaidsJSON }};
 var botPresent = {{ .Guild.BotPresent }};
@@ -328,6 +370,7 @@ document.addEventListener('keydown', function(e) {
 renderCalendar();
 </script>
 
+<script src="/static/multiselect.js"></script>
 {{ template "theme-js" . }}
 </body>
 </html>

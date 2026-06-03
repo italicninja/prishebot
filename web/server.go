@@ -117,6 +117,7 @@ func (s *Server) routes() *gin.Engine {
 		dash.POST("/server/:id/birthday/wish/:userID", s.handleSendBirthdayWish)
 		dash.GET("/server/:id/raids", s.handleRaidsPage)
 		dash.POST("/server/:id/raids/create", s.handleCreateRaidWeb)
+		dash.POST("/server/:id/raids/ping-role", s.handleUpdateRaidPingRole)
 		dash.POST("/server/:id/raids/:raidID/close", s.handleCloseRaidWeb)
 	}
 
