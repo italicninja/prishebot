@@ -228,19 +228,16 @@
         </select>
       </div>
 
-      {{ if .PingRoleID }}
-      <div class="form-field" style="display:flex;align-items:center;gap:0.5rem;">
-        <input type="checkbox" name="ping_role" id="raid-ping" value="1">
-        <label for="raid-ping" style="margin:0;display:inline-flex;align-items:center;gap:0.4rem;">
-          Ping
-          <span class="ms-pill" style="--ms-color: {{ .PingRoleColor }};">
-            {{ if .PingRoleColor }}<span class="ms-dot" style="background: {{ .PingRoleColor }};"></span>{{ end }}
-            <span>{{ .PingRoleName }}</span>
-          </span>
-          when posting
-        </label>
+      <div class="form-field">
+        <label>Ping roles <span class="label-hint">(optional — pre-filled with the guild default; add or remove for this raid)</span></label>
+        <div class="multiselect"
+             data-name="ping_roles"
+             data-source="roles"
+             data-empty="No pings — silent post"
+             data-add-label="+ Add role"
+             data-selected="{{ .PingRoleID }}">
+        </div>
       </div>
-      {{ end }}
 
       <div class="form-actions">
         <button type="submit" class="btn btn-primary">Create &amp; Post</button>

@@ -1185,38 +1185,18 @@ func (s *Server) handleRaidsPage(c *gin.Context) {
 	}
 	rolesJSON, _ := json.Marshal(roleOptions)
 
-	// Resolve the configured role's friendly name (and colour) so the
-	// create-raid form can label the "Ping role on create" checkbox with the
-	// actual role instead of a bare ID. Falls back to the ID when the role
-	// can't be found (deleted? bot lacks GuildRoles access?).
-	var pingRoleName, pingRoleColor string
-	if pingRoleID != "" {
-		for _, r := range roleOptions {
-			if r.ID == pingRoleID {
-				pingRoleName = r.Name
-				pingRoleColor = r.ColorHex
-				break
-			}
-		}
-		if pingRoleName == "" {
-			pingRoleName = pingRoleID
-		}
-	}
-
 	if err := s.tmpl.ExecuteTemplate(c.Writer, "raids.html", gin.H{
-		"User":          sess,
-		"Guild":         &guild,
-		"IsAdmin":       guild.Role == RoleAdmin,
-		"Raids":         raids,
-		"RaidsJSON":     template.JS(raidsJSON),
-		"Channels":      channels,
-		"RolesJSON":     template.JS(rolesJSON),
-		"PingRoleID":    pingRoleID,
-		"PingRoleName":  pingRoleName,
-		"PingRoleColor": pingRoleColor,
-		"PingSaved":     c.Query("ping_saved") == "1",
-		"Created":       c.Query("created") == "1",
-		"ErrMsg":        c.Query("error"),
+		"User":       sess,
+		"Guild":      &guild,
+		"IsAdmin":    guild.Role == RoleAdmin,
+		"Raids":      raids,
+		"RaidsJSON":  template.JS(raidsJSON),
+		"Channels":   channels,
+		"RolesJSON":  template.JS(rolesJSON),
+		"PingRoleID": pingRoleID, // pre-fills the create-raid multi-select
+		"PingSaved":  c.Query("ping_saved") == "1",
+		"Created":    c.Query("created") == "1",
+		"ErrMsg":     c.Query("error"),
 	}); err != nil {
 		log.Printf("[web] raids template error: %v", err)
 		c.Status(http.StatusInternalServerError)
@@ -1272,14 +1252,15 @@ func (s *Server) handleCreateRaidWeb(c *gin.Context) {
 		}
 	}
 
-	// "Ping role on create" checkbox. Form field is absent when unchecked,
-	// "1" when checked. The module no-ops the ping if no role is configured,
-	// so it's safe to pass through whatever the form said.
-	pingRole := c.PostForm("ping_role") == "1"
+	// Per-raid ping list. The chip multi-select renders one hidden input
+	// per selected role; the form may include zero or many of them. Default
+	// pre-fill is the guild's configured ping role, but the creator can
+	// add or remove freely for this specific raid.
+	pingRoleIDs := cleanIDs(c.PostFormArray("ping_roles"))
 
 	if mod, ok := s.bot.Modules()["raid"]; ok {
 		if rm, ok := mod.(*raid.Module); ok {
-			if err := rm.CreateRaidFromWeb(s.bot.Session(), guildID, channelID, title, description, unixTime, pingRole); err != nil {
+			if err := rm.CreateRaidFromWeb(s.bot.Session(), guildID, channelID, title, description, unixTime, pingRoleIDs); err != nil {
 				log.Printf("[web] CreateRaidFromWeb: %v", err)
 				c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids?error=post_failed")
 				return

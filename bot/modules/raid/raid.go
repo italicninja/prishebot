@@ -1518,11 +1518,13 @@ func buildRaidView(r *Raid) RaidView {
 // CreateRaidFromWeb posts a new raid embed to a Discord channel and persists it.
 // This is the web-dashboard equivalent of the /raid create slash command.
 //
-// When pingRole is true AND a per-guild ping role is configured via
-// SetPingRoleID, the message content is "<@&roleID>" with the matching
-// AllowedMentions.Roles list so the ping actually fires. Without a
-// configured role the flag is a no-op (we never invent a role to ping).
-func (m *Module) CreateRaidFromWeb(s *discordgo.Session, guildID, channelID, title, description string, unixTime int64, pingRole bool) error {
+// pingRoleIDs are the roles to mention when posting. The creator picks them
+// per-raid in the dashboard — typically pre-filled with the guild's default
+// ping role (see SetPingRoleID) but freely editable. Empty slice = no ping.
+// AllowedMentions.Roles is scoped to the exact list so only the intended
+// roles get notified, even if Discord's defaults would normally fire every
+// mention in the content.
+func (m *Module) CreateRaidFromWeb(s *discordgo.Session, guildID, channelID, title, description string, unixTime int64, pingRoleIDs []string) error {
 	id := newID()
 	r := &Raid{
 		ID:          id,
@@ -1538,13 +1540,28 @@ func (m *Module) CreateRaidFromWeb(s *discordgo.Session, guildID, channelID, tit
 		Embeds:     []*discordgo.MessageEmbed{m.buildEmbed(r)},
 		Components: m.buildComponents(r),
 	}
-	if pingRole {
-		if roleID := m.PingRoleID(guildID); roleID != "" {
-			send.Content = "<@&" + roleID + ">"
-			// Restrict the ping to exactly this role — Discord's default
-			// would otherwise allow every mention in the payload to fire.
+	if len(pingRoleIDs) > 0 {
+		// Dedupe while preserving the creator's order — Discord ignores
+		// duplicate IDs in allowed_mentions, but dedup keeps the content
+		// readable when the same role appeared in the form twice.
+		seen := make(map[string]struct{}, len(pingRoleIDs))
+		mentions := make([]string, 0, len(pingRoleIDs))
+		uniq := make([]string, 0, len(pingRoleIDs))
+		for _, rid := range pingRoleIDs {
+			if rid == "" {
+				continue
+			}
+			if _, dup := seen[rid]; dup {
+				continue
+			}
+			seen[rid] = struct{}{}
+			mentions = append(mentions, "<@&"+rid+">")
+			uniq = append(uniq, rid)
+		}
+		if len(mentions) > 0 {
+			send.Content = strings.Join(mentions, " ")
 			send.AllowedMentions = &discordgo.MessageAllowedMentions{
-				Roles: []string{roleID},
+				Roles: uniq,
 			}
 		}
 	}
