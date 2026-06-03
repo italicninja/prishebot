@@ -139,14 +139,122 @@ var stdTemplate = RaidTemplate{
 	},
 }
 
-// validRoleKeys is the allow-list of role keys a template may set counts for.
-// Anything else from an untrusted source (form input, JSON file) is dropped.
-func validRoleKeys() map[string]struct{} {
-	out := make(map[string]struct{}, len(stdComp))
+// Slot.Role accepts more than just the five canonical role keys — a template
+// can also require a specific job (e.g. "warrior") or use the aggregate keys
+// "dps" (any melee/ranged/caster) and "any" (any role). The helpers below
+// classify a Slot.Role string and decide whether it accepts a given signee.
+const (
+	slotKeyAnyDPS = "dps"
+	slotKeyAny    = "any"
+)
+
+// validSlotKeys is the allow-list of strings a template's Counts map may
+// use, and that a saved Slot.Role may hold. Anything else from an untrusted
+// source (form input, on-disk JSON) is dropped.
+func validSlotKeys() map[string]struct{} {
+	out := make(map[string]struct{}, len(stdComp)+2+len(allJobs))
 	for _, def := range stdComp {
 		out[def.role] = struct{}{}
 	}
+	out[slotKeyAnyDPS] = struct{}{}
+	out[slotKeyAny] = struct{}{}
+	for _, j := range allJobs {
+		out[j.key] = struct{}{}
+	}
 	return out
+}
+
+// JobInfo is the lightweight projection of jobDef exposed to the web layer
+// (for the template-builder picker). Keys and display names only — no asset
+// URLs, which are an internal concern.
+type JobInfo struct {
+	Key  string `json:"key"`
+	Name string `json:"name"`
+}
+
+// JobsForRole returns every FFXIV job belonging to a role key, in the same
+// order the module uses everywhere else. Returns an empty slice for unknown
+// role keys (defensive against typos in callers).
+func JobsForRole(role string) []JobInfo {
+	jobs := jobsByRole[role]
+	out := make([]JobInfo, 0, len(jobs))
+	for _, j := range jobs {
+		out = append(out, JobInfo{Key: j.key, Name: j.name})
+	}
+	return out
+}
+
+// jobRoleOf returns the canonical role key for a job, or "" if the input
+// isn't a known job. Used to map a signee's job selection back to a role
+// (e.g. "warrior" -> "tank") so we can check whether a slot accepts them.
+func jobRoleOf(job string) string {
+	for role, jobs := range jobsByRole {
+		for _, j := range jobs {
+			if j.key == job {
+				return role
+			}
+		}
+	}
+	return ""
+}
+
+// slotAcceptsRole reports whether a slot can be filled by a signee whose
+// chosen role (i.e. the role button they clicked) is R. Used both to decide
+// whether to render a role's join button at all and to find an available
+// slot during the initial click.
+func slotAcceptsRole(slotRole, R string) bool {
+	switch slotRole {
+	case R:
+		return true
+	case slotKeyAny:
+		return true
+	case slotKeyAnyDPS:
+		return R == "melee" || R == "ranged" || R == "caster"
+	}
+	// Job-specific slot: accepts the role of that job.
+	if jr := jobRoleOf(slotRole); jr != "" {
+		return jr == R
+	}
+	return false
+}
+
+// pickSlotForJob returns the index of the empty slot best matching a signee
+// who picked job J after clicking role R. Priority is most-specific first:
+//
+//  1. job-exact slot (slotRole == J)
+//  2. role-exact slot (slotRole == R)
+//  3. any-DPS slot when R is melee/ranged/caster
+//  4. any-role slot
+//
+// Returns -1 when no slot accepts this signup.
+func pickSlotForJob(slots []Slot, R, J string) int {
+	// 1. job-exact
+	for i, sl := range slots {
+		if sl.Signee == nil && sl.Role == J {
+			return i
+		}
+	}
+	// 2. role-exact
+	for i, sl := range slots {
+		if sl.Signee == nil && sl.Role == R {
+			return i
+		}
+	}
+	// 3. any-DPS
+	if R == "melee" || R == "ranged" || R == "caster" {
+		for i, sl := range slots {
+			if sl.Signee == nil && sl.Role == slotKeyAnyDPS {
+				return i
+			}
+		}
+	}
+	// 4. any-role
+	for i, sl := range slots {
+		if sl.Signee == nil && sl.Role == slotKeyAny {
+			return i
+		}
+	}
+	return -1
 }
 
 type Raid struct {
@@ -226,33 +334,69 @@ func newSlots() []Slot {
 }
 
 // newSlotsFromTemplate builds the per-raid Slots list from a template's
-// counts, iterating stdComp so the role order is stable (tank, healer,
-// melee, ranged, caster). Unknown roles in t.Counts are ignored — the
-// template store filters them on save, but be defensive in case of stale
-// JSON.
+// counts. The output order is stable for predictable embeds:
+//
+//  1. Job-specific slots, grouped by their owning role in stdComp order,
+//     then by the job order inside jobsByRole.
+//  2. Role-only slots in stdComp order.
+//  3. Any-DPS slots.
+//  4. Any-role slots.
+//
+// Unknown keys in t.Counts are ignored — the template store filters them on
+// save, but be defensive in case of stale JSON on disk.
 func newSlotsFromTemplate(t RaidTemplate) []Slot {
-	total := 0
+	slots := make([]Slot, 0)
+	// 1. Job-specific slots, ordered by owning role then job.
 	for _, def := range stdComp {
-		total += t.Counts[def.role]
+		for _, j := range jobsByRole[def.role] {
+			for i := 0; i < t.Counts[j.key]; i++ {
+				slots = append(slots, Slot{Role: j.key})
+			}
+		}
 	}
-	slots := make([]Slot, 0, total)
+	// 2. Role-only slots.
 	for _, def := range stdComp {
 		for i := 0; i < t.Counts[def.role]; i++ {
 			slots = append(slots, Slot{Role: def.role})
 		}
 	}
+	// 3. Any-DPS.
+	for i := 0; i < t.Counts[slotKeyAnyDPS]; i++ {
+		slots = append(slots, Slot{Role: slotKeyAnyDPS})
+	}
+	// 4. Any-role.
+	for i := 0; i < t.Counts[slotKeyAny]; i++ {
+		slots = append(slots, Slot{Role: slotKeyAny})
+	}
 	return slots
 }
 
-// maxByRole counts how many slots of each role a raid has. Used as the "max"
-// in the embed (filled/N) and the per-button disabled check, replacing the
-// previous hardcoded stdComp.max so custom-layout raids render correctly.
-func maxByRole(r *Raid) map[string]int {
-	out := map[string]int{}
-	for _, sl := range r.Slots {
-		out[sl.Role]++
+// slotGroupLabel returns the embed-field title for a Slot.Role group, with
+// the appropriate emoji and human-readable label. Falls back to the raw key
+// when nothing matches — keeps stale data from breaking the render.
+func (m *Module) slotGroupLabel(slotRole string) string {
+	// Aggregate kinds first.
+	switch slotRole {
+	case slotKeyAny:
+		return "🌐 Any Role"
+	case slotKeyAnyDPS:
+		return "⚔️🏹🔮 Any DPS"
 	}
-	return out
+	// Role kinds reuse the stdComp emoji + label.
+	for _, def := range stdComp {
+		if def.role == slotRole {
+			return m.emojiText(def.role, def.fallback) + " " + def.label
+		}
+	}
+	// Job kinds: use the parent role's emoji + the job's display name.
+	if parent := jobRoleOf(slotRole); parent != "" {
+		for _, def := range stdComp {
+			if def.role == parent {
+				return m.emojiText(def.role, def.fallback) + " " + resolveJobName(slotRole)
+			}
+		}
+	}
+	return slotRole
 }
 
 // ── Module ────────────────────────────────────────────────────────────────────
@@ -344,8 +488,11 @@ func (m *Module) AddTemplate(guildID string, t RaidTemplate) error {
 		return fmt.Errorf("id %q is reserved", stdTemplate.ID)
 	}
 
-	// Drop counts for unknown roles, drop zero/negative entries, sum the rest.
-	known := validRoleKeys()
+	// Drop counts for unknown keys, drop zero/negative entries, sum the rest.
+	// Keys may be roles ("tank"), the aggregate keys ("dps"/"any"), or a
+	// specific job ("warrior"). Per-key cap is the same 24-slot total cap
+	// since "any" or "dps" can legitimately be the whole party.
+	known := validSlotKeys()
 	cleaned := make(map[string]int, len(t.Counts))
 	total := 0
 	for k, v := range t.Counts {
@@ -355,8 +502,8 @@ func (m *Module) AddTemplate(guildID string, t RaidTemplate) error {
 		if v <= 0 {
 			continue
 		}
-		if v > 8 {
-			v = 8 // per-role cap — Discord button limits + sanity
+		if v > 24 {
+			v = 24
 		}
 		cleaned[k] = v
 		total += v
@@ -862,9 +1009,12 @@ func (m *Module) handleJoin(s *discordgo.Session, i *discordgo.InteractionCreate
 		ephemeralRespond(s, i, "You're already registered for this raid. Click **Withdraw** first to change.")
 		return
 	}
+	// A role-button click is available if any empty slot accepts the role —
+	// including aggregates (dps/any) and job-specific slots whose owning
+	// role matches.
 	available := 0
 	for _, sl := range raid.Slots {
-		if sl.Role == role && sl.Signee == nil {
+		if sl.Signee == nil && slotAcceptsRole(sl.Role, role) {
 			available++
 		}
 	}
@@ -906,23 +1056,19 @@ func (m *Module) handleJobSelect(s *discordgo.Session, i *discordgo.InteractionC
 		updateEphemeral(s, i, "You're already registered. Click **Withdraw** first to change.")
 		return
 	}
-	claimed := false
-	for idx := range raid.Slots {
-		if raid.Slots[idx].Role == role && raid.Slots[idx].Signee == nil {
-			raid.Slots[idx].Signee = &Signee{
-				UserID:      user.ID,
-				DisplayName: displayName(user),
-				Job:         jobKey,
-				Number:      raid.nextNum(),
-			}
-			claimed = true
-			break
-		}
-	}
-	if !claimed {
+	// Priority pick: job-exact > role-exact > any-DPS > any-role. Avoids
+	// burning a generic "any" slot when a more specific one is available.
+	idx := pickSlotForJob(raid.Slots, role, jobKey)
+	if idx < 0 {
 		m.mu.Unlock()
 		updateEphemeral(s, i, fmt.Sprintf("All **%s** slots were just taken!", roleName(role)))
 		return
+	}
+	raid.Slots[idx].Signee = &Signee{
+		UserID:      user.ID,
+		DisplayName: displayName(user),
+		Job:         jobKey,
+		Number:      raid.nextNum(),
 	}
 	if raid.isFull() {
 		raid.Closed = true
@@ -1329,28 +1475,27 @@ func (m *Module) buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 			fmt.Sprintf("📅 <t:%d:D>  ·  🕐 <t:%d:t>  ·  ⏳ <t:%d:R>", raid.UnixTime, raid.UnixTime, raid.UnixTime))
 	}
 
-	filledByRole := map[string]int{}
-	for _, sl := range raid.Slots {
-		if sl.Signee != nil {
-			filledByRole[sl.Role]++
+	// Group slots by their Role value, preserving first-occurrence order
+	// within each kind. We then iterate the kinds in a stable display order:
+	// job-specific → role-only → any-DPS → any-role.
+	groupIndices := map[string][]int{}
+	groupOrder := []string{} // unique keys in first-seen order
+	for i, sl := range raid.Slots {
+		if _, seen := groupIndices[sl.Role]; !seen {
+			groupOrder = append(groupOrder, sl.Role)
 		}
+		groupIndices[sl.Role] = append(groupIndices[sl.Role], i)
 	}
-	roleMax := maxByRole(raid)
 
 	var fields []*discordgo.MessageEmbedField
-	for _, def := range stdComp {
-		// Skip roles the active raid template doesn't include — a "no healers"
-		// or "all DPS" comp shouldn't render an empty Healer field.
-		if roleMax[def.role] == 0 {
-			continue
-		}
-		icon := m.emojiText(def.role, def.fallback)
+	for _, key := range groupOrder {
+		idxs := groupIndices[key]
+		filled := 0
 		var lines []string
-		for _, sl := range raid.Slots {
-			if sl.Role != def.role {
-				continue
-			}
+		for _, i := range idxs {
+			sl := raid.Slots[i]
 			if sl.Signee != nil {
+				filled++
 				line := fmt.Sprintf("`%d` <@%s>", sl.Signee.Number, sl.Signee.UserID)
 				if sl.Signee.Job != "" {
 					if e := m.jobEmoji[sl.Signee.Job]; e != nil {
@@ -1368,7 +1513,7 @@ func (m *Module) buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 			}
 		}
 		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   fmt.Sprintf("%s %s (%d/%d)", icon, def.label, filledByRole[def.role], roleMax[def.role]),
+			Name:   fmt.Sprintf("%s (%d/%d)", m.slotGroupLabel(key), filled, len(idxs)),
 			Value:  strings.Join(lines, "\n"),
 			Inline: true,
 		})
@@ -1423,12 +1568,20 @@ func (m *Module) buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 		Footer:      &discordgo.MessageEmbedFooter{Text: "ID: " + raid.ID},
 	}
 	if !raid.Closed {
+		// Pick the first role (in stdComp order) that still has an empty slot
+		// somewhere — could be a role-specific, job-specific (under that role),
+		// dps, or any-role slot. The thumbnail nudges the next likely sign-up.
 		for _, def := range stdComp {
-			if roleMax[def.role] == 0 {
-				continue
+			for _, sl := range raid.Slots {
+				if sl.Signee != nil {
+					continue
+				}
+				if slotAcceptsRole(sl.Role, def.role) {
+					embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: def.iconURL}
+					break
+				}
 			}
-			if filledByRole[def.role] < roleMax[def.role] {
-				embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: def.iconURL}
+			if embed.Thumbnail != nil {
 				break
 			}
 		}
@@ -1439,26 +1592,32 @@ func (m *Module) buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 // ── Component builder ─────────────────────────────────────────────────────────
 
 func (m *Module) buildComponents(raid *Raid) []discordgo.MessageComponent {
-	filledByRole := map[string]int{}
+	// Count total/filled slots that accept each role (counting aggregate and
+	// job-specific slots toward every role they could accept). A button is
+	// shown when total > 0 and disabled when filled == total.
+	total := map[string]int{}
+	filled := map[string]int{}
 	for _, sl := range raid.Slots {
-		if sl.Signee != nil {
-			filledByRole[sl.Role]++
+		for _, def := range stdComp {
+			if slotAcceptsRole(sl.Role, def.role) {
+				total[def.role]++
+				if sl.Signee != nil {
+					filled[def.role]++
+				}
+			}
 		}
 	}
-	roleMax := maxByRole(raid)
 
 	joinRow := make([]discordgo.MessageComponent, 0, len(stdComp))
 	for _, def := range stdComp {
-		// Skip the role entirely when the active template has zero slots for
-		// it — no button for a section that doesn't exist on this raid.
-		if roleMax[def.role] == 0 {
+		if total[def.role] == 0 {
 			continue
 		}
 		btn := discordgo.Button{
 			Label:    def.label,
 			Style:    def.style,
 			CustomID: fmt.Sprintf("raid:join:%s:%s", raid.ID, def.role),
-			Disabled: filledByRole[def.role] >= roleMax[def.role] || raid.Closed,
+			Disabled: filled[def.role] >= total[def.role] || raid.Closed,
 		}
 		if e, ok := m.roleEmoji[def.role]; ok {
 			btn.Emoji = e

@@ -1300,13 +1300,52 @@ func (s *Server) handleRaidTemplatesPage(c *gin.Context) {
 		templates = rm.GuildTemplates(guildID)
 	}
 
+	// JSON payloads consumed by the client-side renderer:
+	//   - templates → chip lists on each saved-template card
+	//   - kind options → the <select> in the dynamic slot-row form, with
+	//     specific jobs grouped under an "optgroup" for legibility.
+	templatesJSON, _ := json.Marshal(templates)
+	type kindOpt struct {
+		Value    string    `json:"value,omitempty"`
+		Label    string    `json:"label,omitempty"`
+		Group    string    `json:"group,omitempty"`
+		Children []kindOpt `json:"children,omitempty"`
+	}
+	roleLabels := map[string]string{
+		"tank":   "🛡️ Tank",
+		"healer": "💚 Healer",
+		"melee":  "⚔️ Melee DPS",
+		"ranged": "🏹 Ranged DPS",
+		"caster": "🔮 Caster DPS",
+	}
+	opts := []kindOpt{
+		{Value: "tank", Label: roleLabels["tank"]},
+		{Value: "healer", Label: roleLabels["healer"]},
+		{Value: "melee", Label: roleLabels["melee"]},
+		{Value: "ranged", Label: roleLabels["ranged"]},
+		{Value: "caster", Label: roleLabels["caster"]},
+		{Value: "dps", Label: "⚔️🏹🔮 Any DPS"},
+		{Value: "any", Label: "🌐 Any role"},
+	}
+	// Specific-job options, grouped by role for the optgroup.
+	for _, role := range []string{"tank", "healer", "melee", "ranged", "caster"} {
+		g := kindOpt{Group: roleLabels[role] + " jobs"}
+		for _, j := range raid.JobsForRole(role) {
+			g.Children = append(g.Children, kindOpt{Value: j.Key, Label: j.Name})
+		}
+		opts = append(opts, g)
+	}
+	kindOptsJSON, _ := json.Marshal(opts)
+
 	if err := s.tmpl.ExecuteTemplate(c.Writer, "raid-templates.html", gin.H{
-		"User":      sess,
-		"Guild":     &guild,
-		"Templates": templates,
-		"Saved":     c.Query("saved") == "1",
-		"Deleted":   c.Query("deleted") == "1",
-		"ErrMsg":    c.Query("error"),
+		"User":                sess,
+		"Guild":               &guild,
+		"Templates":           templates,
+		"TemplatesJSON":       template.JS(templatesJSON),
+		"SlotKindOptionsJSON": template.JS(kindOptsJSON),
+		"Saved":               c.Query("saved") == "1",
+		"Deleted":             c.Query("deleted") == "1",
+		"ErrMsg":              c.Query("error"),
 	}); err != nil {
 		log.Printf("[web] raid-templates template error: %v", err)
 		c.Status(http.StatusInternalServerError)
@@ -1333,12 +1372,22 @@ func (s *Server) handleCreateRaidTemplate(c *gin.Context) {
 		Name:   strings.TrimSpace(c.PostForm("name")),
 		Counts: map[string]int{},
 	}
-	// Each role count is its own number input. atoi ignores bad input — the
-	// module then drops zero/negative entries and rejects empty templates.
-	for _, role := range []string{"tank", "healer", "melee", "ranged", "caster"} {
-		if n, err := strconv.Atoi(strings.TrimSpace(c.PostForm("count_" + role))); err == nil {
-			t.Counts[role] = n
+	// The form posts one (kind, count) pair per slot row via parallel arrays
+	// named "kinds" and "counts". We zip them by index — the module then
+	// drops unknown keys, zero/negative counts, and rejects empty templates.
+	kinds := c.PostFormArray("kinds")
+	counts := c.PostFormArray("counts")
+	for i, k := range kinds {
+		k = strings.TrimSpace(k)
+		if k == "" || i >= len(counts) {
+			continue
 		}
+		n, err := strconv.Atoi(strings.TrimSpace(counts[i]))
+		if err != nil || n <= 0 {
+			continue
+		}
+		// Summing accumulates duplicate rows (e.g. two "any DPS" rows = total).
+		t.Counts[k] += n
 	}
 	if err := rm.AddTemplate(guildID, t); err != nil {
 		log.Printf("[web] AddTemplate: %v", err)

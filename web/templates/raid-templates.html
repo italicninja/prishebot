@@ -48,13 +48,7 @@
         <span class="raid-title">{{ .Name }}</span>
         <span style="margin-left:auto;font-size:0.7rem;color:var(--muted);font-family:ui-monospace,monospace;">{{ .ID }}</span>
       </div>
-      <div style="display:flex;gap:0.75rem;flex-wrap:wrap;padding:0.5rem 0.75rem 0.75rem;">
-        {{ with index .Counts "tank" }}{{ if . }}<span class="ms-pill">🛡️ Tank × {{ . }}</span>{{ end }}{{ end }}
-        {{ with index .Counts "healer" }}{{ if . }}<span class="ms-pill">💚 Healer × {{ . }}</span>{{ end }}{{ end }}
-        {{ with index .Counts "melee" }}{{ if . }}<span class="ms-pill">⚔️ Melee × {{ . }}</span>{{ end }}{{ end }}
-        {{ with index .Counts "ranged" }}{{ if . }}<span class="ms-pill">🏹 Ranged × {{ . }}</span>{{ end }}{{ end }}
-        {{ with index .Counts "caster" }}{{ if . }}<span class="ms-pill">🔮 Caster × {{ . }}</span>{{ end }}{{ end }}
-      </div>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;padding:0.5rem 0.75rem 0.75rem;" data-slots="{{ .ID }}"></div>
       {{ if ne .ID "standard" }}
       <div class="raid-card-foot">
         <form method="POST" action="/dashboard/server/{{ $.Guild.ID }}/raids/templates/{{ .ID }}/delete"
@@ -70,47 +64,113 @@
   <!-- ── New template form ───────────────────────────────────────────────── -->
   <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:2rem 0 0.75rem;">New template</div>
   <div class="card">
-    <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/raids/templates">
+    <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/raids/templates" id="tpl-form">
       <div class="form-field">
         <label for="tpl-name">Name</label>
         <input type="text" name="name" id="tpl-name" class="form-input"
                placeholder="e.g. Light party (1T/1H/2DPS)" maxlength="50" required>
       </div>
 
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(8rem,1fr));gap:0.75rem;margin-top:0.75rem;">
-        <div class="form-field">
-          <label for="tpl-tank">🛡️ Tank</label>
-          <input type="number" name="count_tank" id="tpl-tank" class="form-input" min="0" max="8" value="0">
-        </div>
-        <div class="form-field">
-          <label for="tpl-healer">💚 Healer</label>
-          <input type="number" name="count_healer" id="tpl-healer" class="form-input" min="0" max="8" value="0">
-        </div>
-        <div class="form-field">
-          <label for="tpl-melee">⚔️ Melee</label>
-          <input type="number" name="count_melee" id="tpl-melee" class="form-input" min="0" max="8" value="0">
-        </div>
-        <div class="form-field">
-          <label for="tpl-ranged">🏹 Ranged</label>
-          <input type="number" name="count_ranged" id="tpl-ranged" class="form-input" min="0" max="8" value="0">
-        </div>
-        <div class="form-field">
-          <label for="tpl-caster">🔮 Caster</label>
-          <input type="number" name="count_caster" id="tpl-caster" class="form-input" min="0" max="8" value="0">
-        </div>
+      <div class="form-field">
+        <label>Slots</label>
+        <p class="module-perms-help" style="margin:0 0 0.5rem;">
+          Add one row per slot kind. Pick a role for any-of-that-role, an aggregate (Any DPS / Any role) for unrestricted,
+          or a specific job to lock the slot to one job. Total slots must be 1–24.
+        </p>
+        <div id="slot-rows"></div>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="addSlotRow()">+ Add slot</button>
       </div>
 
-      <p class="module-perms-help" style="margin:0.75rem 0;">
-        Each number is how many slots of that role appear on the raid sign-up. Roles set to <code>0</code> are hidden entirely
-        (no button, no field). Total must be at least 1 and at most 24 slots.
-      </p>
-
-      <div class="form-actions">
+      <div class="form-actions" style="margin-top:1rem;">
         <button type="submit" class="btn btn-primary">Save template</button>
       </div>
     </form>
   </div>
 </div>
+
+<!-- Hidden source data for rendering existing-template chips + the row picker. -->
+<script>
+window.TEMPLATE_DATA = {{ .TemplatesJSON }};
+window.SLOT_KIND_OPTIONS = {{ .SlotKindOptionsJSON }};
+</script>
+<script>
+// ── Render the chip list for each saved template card ───────────────────────
+(function () {
+  function labelFor(key) {
+    for (var i = 0; i < window.SLOT_KIND_OPTIONS.length; i++) {
+      var opt = window.SLOT_KIND_OPTIONS[i];
+      if (opt.value === key) return opt.label;
+    }
+    return key;
+  }
+  document.querySelectorAll('[data-slots]').forEach(function (host) {
+    var tplID = host.getAttribute('data-slots');
+    var tpl = (window.TEMPLATE_DATA || []).find(function (t) { return t.id === tplID; });
+    if (!tpl) return;
+    Object.keys(tpl.counts || {}).forEach(function (key) {
+      var n = tpl.counts[key];
+      if (!n) return;
+      var pill = document.createElement('span');
+      pill.className = 'ms-pill';
+      pill.textContent = labelFor(key) + ' × ' + n;
+      host.appendChild(pill);
+    });
+  });
+})();
+
+// ── Dynamic slot-row form ──────────────────────────────────────────────────
+function addSlotRow(kind, count) {
+  var host = document.getElementById('slot-rows');
+  var row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:0.5rem;align-items:center;margin-bottom:0.5rem;';
+
+  var sel = document.createElement('select');
+  sel.name = 'kinds';
+  sel.className = 'form-select';
+  sel.style.flex = '1';
+  (window.SLOT_KIND_OPTIONS || []).forEach(function (opt) {
+    if (opt.group) {
+      var og = document.createElement('optgroup');
+      og.label = opt.group;
+      (opt.children || []).forEach(function (c) {
+        var o = document.createElement('option');
+        o.value = c.value; o.textContent = c.label;
+        og.appendChild(o);
+      });
+      sel.appendChild(og);
+    } else {
+      var o = document.createElement('option');
+      o.value = opt.value; o.textContent = opt.label;
+      sel.appendChild(o);
+    }
+  });
+  if (kind) sel.value = kind;
+
+  var num = document.createElement('input');
+  num.type = 'number';
+  num.name = 'counts';
+  num.className = 'form-input';
+  num.min = '1';
+  num.max = '24';
+  num.value = count || '1';
+  num.style.width = '5rem';
+
+  var rm = document.createElement('button');
+  rm.type = 'button';
+  rm.className = 'btn btn-ghost btn-sm';
+  rm.textContent = '✕';
+  rm.title = 'Remove this slot row';
+  rm.addEventListener('click', function () { row.remove(); });
+
+  row.appendChild(sel);
+  row.appendChild(num);
+  row.appendChild(rm);
+  host.appendChild(row);
+}
+
+// Start with one empty row so the form isn't blank.
+addSlotRow();
+</script>
 
 {{ template "theme-js" . }}
 </body>
