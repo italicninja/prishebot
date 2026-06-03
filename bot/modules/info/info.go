@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,18 +35,43 @@ type ModuleListing struct {
 // live bot is fine even when this module is loaded before others.
 type ListModulesFunc func(guildID string) []ModuleListing
 
+// CommandHelp is a single command's metadata as exposed to /help — enough
+// to render signatures and a description, without dragging the full
+// discordgo.ApplicationCommand into the info module's surface.
+type CommandHelp struct {
+	Module      string
+	Category    bot.Category
+	Name        string
+	Description string
+	Options     []*discordgo.ApplicationCommandOption
+	Enabled     bool // is the owning module enabled in the guild being queried
+}
+
+// AllCommandsFunc returns every command registered by every module, with
+// the enabled flag reflecting the guild's per-module settings. Like
+// ListModulesFunc, this is called at request time so a closure capturing
+// the bot sees the live state regardless of module load order.
+type AllCommandsFunc func(guildID string) []CommandHelp
+
 // Module implements bot.Module for server and bot information commands.
 type Module struct {
 	appID       string
 	startTime   time.Time
 	listModules ListModulesFunc
+	allCommands AllCommandsFunc
 }
 
 // New creates the info module. appID is the Discord application / client ID;
 // startTime is when the process started (used in both status and bio);
-// listModules supplies the data shown by /modules at command-run time.
-func New(appID string, startTime time.Time, listModules ListModulesFunc) *Module {
-	return &Module{appID: appID, startTime: startTime, listModules: listModules}
+// listModules supplies the data shown by /modules at command-run time;
+// allCommands supplies the data shown by /help.
+func New(appID string, startTime time.Time, listModules ListModulesFunc, allCommands AllCommandsFunc) *Module {
+	return &Module{
+		appID:       appID,
+		startTime:   startTime,
+		listModules: listModules,
+		allCommands: allCommands,
+	}
 }
 
 func (m *Module) Name() string { return "info" }
@@ -55,6 +81,9 @@ func (m *Module) Description() string {
 func (m *Module) Category() bot.Category { return bot.CategoryFunctional }
 
 func (m *Module) Commands() []*discordgo.ApplicationCommand {
+	// help is on every-member access by default — clear the admin-only
+	// default that bot.LoadModule would otherwise stamp onto it.
+	allMembers := int64(discordgo.PermissionViewChannel)
 	return []*discordgo.ApplicationCommand{
 		{
 			Name:        "serverinfo",
@@ -68,6 +97,11 @@ func (m *Module) Commands() []*discordgo.ApplicationCommand {
 			Name:        "modules",
 			Description: "List the modules currently active on this server",
 		},
+		{
+			Name:                     "help",
+			Description:              "Show every available command with usage examples (only you see the reply)",
+			DefaultMemberPermissions: &allMembers,
+		},
 	}
 }
 
@@ -80,6 +114,8 @@ func (m *Module) HandleInteraction(s *discordgo.Session, i *discordgo.Interactio
 		m.botInfo(s, i)
 	case "modules":
 		m.modulesList(s, i)
+	case "help":
+		m.helpList(s, i)
 	}
 }
 
@@ -262,6 +298,153 @@ func (m *Module) modulesList(s *discordgo.Session, i *discordgo.InteractionCreat
 	}); err != nil {
 		log.Printf("[info] failed to respond to /modules: %v", err)
 	}
+}
+
+// helpList responds with an ephemeral embed listing every command available
+// to the user in this guild, grouped by module category and showing the
+// signature (subcommand paths + parameter placeholders) for each. Commands
+// from disabled modules are omitted but called out in the footer.
+func (m *Module) helpList(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.GuildID == "" {
+		respondError(s, i, "This command only works in a server.")
+		return
+	}
+	if m.allCommands == nil {
+		respondError(s, i, "Command listing isn't wired up.")
+		return
+	}
+
+	all := m.allCommands(i.GuildID)
+
+	// Group enabled commands by category, then by module name. Track which
+	// modules are disabled so we can list them in the footer.
+	type cmdByModule struct {
+		Name string
+		Cmds []CommandHelp
+	}
+	byCategory := map[bot.Category]map[string]*cmdByModule{}
+	disabledModules := map[string]struct{}{}
+	for _, ch := range all {
+		if !ch.Enabled {
+			disabledModules[ch.Module] = struct{}{}
+			continue
+		}
+		cat := ch.Category
+		if cat == "" {
+			cat = bot.CategoryFunctional
+		}
+		if byCategory[cat] == nil {
+			byCategory[cat] = map[string]*cmdByModule{}
+		}
+		bucket := byCategory[cat][ch.Module]
+		if bucket == nil {
+			bucket = &cmdByModule{Name: ch.Module}
+			byCategory[cat][ch.Module] = bucket
+		}
+		bucket.Cmds = append(bucket.Cmds, ch)
+	}
+
+	categoryEmoji := map[bot.Category]string{
+		bot.CategoryFunctional: "🛠️",
+		bot.CategoryFun:        "🎉",
+	}
+
+	var fields []*discordgo.MessageEmbedField
+	for _, cat := range bot.CategoryOrder {
+		mods := byCategory[cat]
+		if len(mods) == 0 {
+			continue
+		}
+		// Render module sub-lists in sorted order for stable output.
+		modNames := make([]string, 0, len(mods))
+		for name := range mods {
+			modNames = append(modNames, name)
+		}
+		sort.Strings(modNames)
+
+		var blocks []string
+		for _, name := range modNames {
+			bucket := mods[name]
+			sort.Slice(bucket.Cmds, func(a, b int) bool {
+				return bucket.Cmds[a].Name < bucket.Cmds[b].Name
+			})
+			var lines []string
+			lines = append(lines, "**"+name+"**")
+			for _, ch := range bucket.Cmds {
+				for _, sig := range buildSigs("/"+ch.Name, ch.Options) {
+					lines = append(lines, "`"+sig+"`")
+				}
+				if ch.Description != "" {
+					lines = append(lines, "  ↳ "+ch.Description)
+				}
+			}
+			blocks = append(blocks, strings.Join(lines, "\n"))
+		}
+
+		emoji := categoryEmoji[cat]
+		if emoji == "" {
+			emoji = "📦"
+		}
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:  fmt.Sprintf("%s %s", emoji, cat),
+			Value: strings.Join(blocks, "\n\n"),
+		})
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "Prishe — Available commands",
+		Description: "Pick a command from the slash menu, or type it directly. Parameters: `<required>` / `[optional]`.",
+		Color:       discordBlurple,
+		Fields:      fields,
+	}
+	if len(fields) == 0 {
+		embed.Description = "_No commands are available right now — every module is disabled in this server._"
+	}
+	if len(disabledModules) > 0 {
+		names := make([]string, 0, len(disabledModules))
+		for n := range disabledModules {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		embed.Footer = &discordgo.MessageEmbedFooter{
+			Text: "Commands from disabled modules hidden: " + strings.Join(names, ", "),
+		}
+	}
+
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+			Flags:  discordgo.MessageFlagsEphemeral,
+		},
+	}); err != nil {
+		log.Printf("[info] failed to respond to /help: %v", err)
+	}
+}
+
+// buildSigs flattens a slash command into one signature string per leaf path.
+// Mirrors web/handlers.go's buildSigs — kept duplicated here to keep the info
+// module standalone from the web package.
+func buildSigs(prefix string, opts []*discordgo.ApplicationCommandOption) []string {
+	if len(opts) > 0 &&
+		(opts[0].Type == discordgo.ApplicationCommandOptionSubCommand ||
+			opts[0].Type == discordgo.ApplicationCommandOptionSubCommandGroup) {
+		var out []string
+		for _, o := range opts {
+			out = append(out, buildSigs(prefix+" "+o.Name, o.Options)...)
+		}
+		return out
+	}
+	var sb strings.Builder
+	sb.WriteString(prefix)
+	for _, o := range opts {
+		if o.Required {
+			fmt.Fprintf(&sb, " <%s>", o.Name)
+		} else {
+			fmt.Fprintf(&sb, " [%s]", o.Name)
+		}
+	}
+	return []string{sb.String()}
 }
 
 func pluralS(n int) string {

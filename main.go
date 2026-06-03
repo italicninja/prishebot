@@ -78,7 +78,28 @@ func main() {
 		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 		return out
 	}
-	if err := b.LoadModule(info.New(cfg.ClientID, startTime, listModules)); err != nil {
+	// Closure powers /help — iterates every loaded module's command list
+	// at request time so a closure works regardless of module load order.
+	allCommands := func(guildID string) []info.CommandHelp {
+		settings := b.GuildModuleSettings(guildID)
+		mods := b.Modules()
+		var out []info.CommandHelp
+		for name, mod := range mods {
+			enabled := settings[name]
+			for _, cmd := range mod.Commands() {
+				out = append(out, info.CommandHelp{
+					Module:      name,
+					Category:    mod.Category(),
+					Name:        cmd.Name,
+					Description: cmd.Description,
+					Options:     cmd.Options,
+					Enabled:     enabled,
+				})
+			}
+		}
+		return out
+	}
+	if err := b.LoadModule(info.New(cfg.ClientID, startTime, listModules, allCommands)); err != nil {
 		log.Fatalf("failed to load info module: %v", err)
 	}
 	if err := b.LoadModule(birthday.New(cfg.BirthdayDataFile, cfg.GIFsDir)); err != nil {
