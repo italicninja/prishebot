@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prishe — Raid templates · {{ .Guild.Name }}</title>
+  {{ template "theme-init" . }}
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{{ template "auth-nav" . }}
+
+<div class="page">
+  <div class="crumb">
+    <a href="/dashboard" class="btn btn-ghost btn-sm">← Servers</a>
+    <a href="/dashboard/server/{{ .Guild.ID }}" class="btn btn-ghost btn-sm">{{ .Guild.Name }}</a>
+    <a href="/dashboard/server/{{ .Guild.ID }}/raids" class="btn btn-ghost btn-sm">Raids</a>
+  </div>
+
+  <div class="guild-header">
+    {{ if .Guild.IconURL }}
+      <img class="guild-icon" src="{{ .Guild.IconURL }}" alt="{{ .Guild.Name }}">
+    {{ else }}
+      <div class="guild-icon-ph">{{ slice .Guild.Name 0 1 }}</div>
+    {{ end }}
+    <div>
+      <div class="guild-name">Raid templates</div>
+      <div class="guild-sub">Custom slot layouts for the create-raid form · admin-only</div>
+    </div>
+  </div>
+
+  {{ if .Saved }}
+  <div class="banner banner-success">Template saved.</div>
+  {{ end }}
+  {{ if .Deleted }}
+  <div class="banner banner-success">Template removed.</div>
+  {{ end }}
+  {{ if .ErrMsg }}
+  <div class="banner banner-error">{{ .ErrMsg }}</div>
+  {{ end }}
+
+  <!-- ── Existing templates ──────────────────────────────────────────────── -->
+  <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:0 0 0.75rem;">Available templates</div>
+  <div class="raid-list">
+    {{ range .Templates }}
+    <div class="raid-card">
+      <div class="raid-card-head">
+        <span class="raid-title">{{ .Name }}</span>
+        <span style="margin-left:auto;font-size:0.7rem;color:var(--muted);font-family:ui-monospace,monospace;">{{ .ID }}</span>
+      </div>
+      <div style="display:flex;gap:0.75rem;flex-wrap:wrap;padding:0.5rem 0.75rem 0.75rem;">
+        {{ with index .Counts "tank" }}{{ if . }}<span class="ms-pill">🛡️ Tank × {{ . }}</span>{{ end }}{{ end }}
+        {{ with index .Counts "healer" }}{{ if . }}<span class="ms-pill">💚 Healer × {{ . }}</span>{{ end }}{{ end }}
+        {{ with index .Counts "melee" }}{{ if . }}<span class="ms-pill">⚔️ Melee × {{ . }}</span>{{ end }}{{ end }}
+        {{ with index .Counts "ranged" }}{{ if . }}<span class="ms-pill">🏹 Ranged × {{ . }}</span>{{ end }}{{ end }}
+        {{ with index .Counts "caster" }}{{ if . }}<span class="ms-pill">🔮 Caster × {{ . }}</span>{{ end }}{{ end }}
+      </div>
+      {{ if ne .ID "standard" }}
+      <div class="raid-card-foot">
+        <form method="POST" action="/dashboard/server/{{ $.Guild.ID }}/raids/templates/{{ .ID }}/delete"
+              onsubmit="return confirm('Delete the {{ .Name }} template? Existing raids that used it keep their slots — only future creations are affected.')">
+          <button type="submit" class="btn btn-ghost btn-sm">Delete</button>
+        </form>
+      </div>
+      {{ end }}
+    </div>
+    {{ end }}
+  </div>
+
+  <!-- ── New template form ───────────────────────────────────────────────── -->
+  <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:2rem 0 0.75rem;">New template</div>
+  <div class="card">
+    <form method="POST" action="/dashboard/server/{{ .Guild.ID }}/raids/templates">
+      <div class="form-field">
+        <label for="tpl-name">Name</label>
+        <input type="text" name="name" id="tpl-name" class="form-input"
+               placeholder="e.g. Light party (1T/1H/2DPS)" maxlength="50" required>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(8rem,1fr));gap:0.75rem;margin-top:0.75rem;">
+        <div class="form-field">
+          <label for="tpl-tank">🛡️ Tank</label>
+          <input type="number" name="count_tank" id="tpl-tank" class="form-input" min="0" max="8" value="0">
+        </div>
+        <div class="form-field">
+          <label for="tpl-healer">💚 Healer</label>
+          <input type="number" name="count_healer" id="tpl-healer" class="form-input" min="0" max="8" value="0">
+        </div>
+        <div class="form-field">
+          <label for="tpl-melee">⚔️ Melee</label>
+          <input type="number" name="count_melee" id="tpl-melee" class="form-input" min="0" max="8" value="0">
+        </div>
+        <div class="form-field">
+          <label for="tpl-ranged">🏹 Ranged</label>
+          <input type="number" name="count_ranged" id="tpl-ranged" class="form-input" min="0" max="8" value="0">
+        </div>
+        <div class="form-field">
+          <label for="tpl-caster">🔮 Caster</label>
+          <input type="number" name="count_caster" id="tpl-caster" class="form-input" min="0" max="8" value="0">
+        </div>
+      </div>
+
+      <p class="module-perms-help" style="margin:0.75rem 0;">
+        Each number is how many slots of that role appear on the raid sign-up. Roles set to <code>0</code> are hidden entirely
+        (no button, no field). Total must be at least 1 and at most 24 slots.
+      </p>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save template</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{{ template "theme-js" . }}
+</body>
+</html>

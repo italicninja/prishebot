@@ -1127,10 +1127,12 @@ func (s *Server) handleRaidsPage(c *gin.Context) {
 
 	var raids []raid.RaidView
 	var pingRoleID string
+	var templates []raid.RaidTemplate
 	if mod, ok := s.bot.Modules()["raid"]; ok {
 		if rm, ok := mod.(*raid.Module); ok {
 			raids = rm.GuildRaids(guildID)
 			pingRoleID = rm.PingRoleID(guildID)
+			templates = rm.GuildTemplates(guildID)
 		}
 	}
 
@@ -1194,6 +1196,7 @@ func (s *Server) handleRaidsPage(c *gin.Context) {
 		"Channels":   channels,
 		"RolesJSON":  template.JS(rolesJSON),
 		"PingRoleID": pingRoleID, // pre-fills the create-raid multi-select
+		"Templates":  templates,
 		"PingSaved":  c.Query("ping_saved") == "1",
 		"Created":    c.Query("created") == "1",
 		"ErrMsg":     c.Query("error"),
@@ -1260,9 +1263,13 @@ func (s *Server) handleCreateRaidWeb(c *gin.Context) {
 	// add or remove freely for this specific raid.
 	pingRoleIDs := cleanIDs(c.PostFormArray("ping_roles"))
 
+	// Composition template — "standard" / "" both resolve to the built-in
+	// 2T/2H/2M/1R/1C layout inside the module.
+	templateID := strings.TrimSpace(c.PostForm("template"))
+
 	if mod, ok := s.bot.Modules()["raid"]; ok {
 		if rm, ok := mod.(*raid.Module); ok {
-			if err := rm.CreateRaidFromWeb(s.bot.Session(), guildID, channelID, title, description, unixTime, pingRoleIDs); err != nil {
+			if err := rm.CreateRaidFromWeb(s.bot.Session(), guildID, channelID, title, description, unixTime, pingRoleIDs, templateID); err != nil {
 				log.Printf("[web] CreateRaidFromWeb: %v", err)
 				c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids?error=post_failed")
 				return
@@ -1271,6 +1278,111 @@ func (s *Server) handleCreateRaidWeb(c *gin.Context) {
 	}
 
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids?created=1")
+}
+
+// handleRaidTemplatesPage renders the admin-only page for managing custom
+// raid composition templates. The "standard" template is always shown at the
+// top as read-only — it can't be edited or deleted.
+func (s *Server) handleRaidTemplatesPage(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	src := requireGuildAccess(c, sess, guildID, true)
+	if src == nil {
+		return
+	}
+	guild := *src
+	guild.BotPresent = s.botGuildSet()[guildID]
+
+	rm, _ := s.bot.Modules()["raid"].(*raid.Module)
+	var templates []raid.RaidTemplate
+	if rm != nil {
+		templates = rm.GuildTemplates(guildID)
+	}
+
+	if err := s.tmpl.ExecuteTemplate(c.Writer, "raid-templates.html", gin.H{
+		"User":      sess,
+		"Guild":     &guild,
+		"Templates": templates,
+		"Saved":     c.Query("saved") == "1",
+		"Deleted":   c.Query("deleted") == "1",
+		"ErrMsg":    c.Query("error"),
+	}); err != nil {
+		log.Printf("[web] raid-templates template error: %v", err)
+		c.Status(http.StatusInternalServerError)
+	}
+}
+
+// handleCreateRaidTemplate accepts a new custom template from the form.
+// Admin-only — same trust level as the rest of the raid settings UI.
+func (s *Server) handleCreateRaidTemplate(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	if requireGuildAccess(c, sess, guildID, true) == nil {
+		return
+	}
+
+	rm, ok := s.bot.Modules()["raid"].(*raid.Module)
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids/templates?error=raid_unavailable")
+		return
+	}
+
+	t := raid.RaidTemplate{
+		Name:   strings.TrimSpace(c.PostForm("name")),
+		Counts: map[string]int{},
+	}
+	// Each role count is its own number input. atoi ignores bad input — the
+	// module then drops zero/negative entries and rejects empty templates.
+	for _, role := range []string{"tank", "healer", "melee", "ranged", "caster"} {
+		if n, err := strconv.Atoi(strings.TrimSpace(c.PostForm("count_" + role))); err == nil {
+			t.Counts[role] = n
+		}
+	}
+	if err := rm.AddTemplate(guildID, t); err != nil {
+		log.Printf("[web] AddTemplate: %v", err)
+		c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids/templates?error="+err.Error())
+		return
+	}
+
+	total := 0
+	for _, n := range t.Counts {
+		total += n
+	}
+	s.postAudit(guildID, sess, "Raid template added",
+		"Added **"+t.Name+"** ("+strconv.Itoa(total)+" slots).")
+
+	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids/templates?saved=1")
+}
+
+// handleDeleteRaidTemplate removes a custom template. Cannot remove the
+// built-in standard template; the module returns an error in that case.
+func (s *Server) handleDeleteRaidTemplate(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	if requireGuildAccess(c, sess, guildID, true) == nil {
+		return
+	}
+
+	rm, ok := s.bot.Modules()["raid"].(*raid.Module)
+	if !ok {
+		c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids/templates?error=raid_unavailable")
+		return
+	}
+
+	tid := c.Param("tid")
+	if err := rm.DeleteTemplate(guildID, tid); err != nil {
+		log.Printf("[web] DeleteTemplate: %v", err)
+		c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids/templates?error="+err.Error())
+		return
+	}
+
+	s.postAudit(guildID, sess, "Raid template removed",
+		"Removed template `"+tid+"`.")
+
+	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids/templates?deleted=1")
 }
 
 // handleUpdateRaidPingRole stores the per-guild raid ping role. Admin-only —

@@ -115,6 +115,40 @@ type StatusEntry struct {
 	Number      int    `json:"number"`
 }
 
+// RaidTemplate is a saved per-role slot-count layout that creators can pick
+// when posting a new raid. The role keys are constrained to the same set
+// stdComp defines (tank / healer / melee / ranged / caster) so the existing
+// buttons, emojis, and job-picker keep working. Only the slot counts change.
+type RaidTemplate struct {
+	ID     string         `json:"id"`     // short slug, used as the form value
+	Name   string         `json:"name"`   // user-facing display
+	Counts map[string]int `json:"counts"` // role key -> slot count
+}
+
+// stdTemplate is the built-in canonical 8-man composition. Always available
+// in every guild's template list; can't be deleted.
+var stdTemplate = RaidTemplate{
+	ID:   "standard",
+	Name: "Standard (2T/2H/2M/1R/1C)",
+	Counts: map[string]int{
+		"tank":   2,
+		"healer": 2,
+		"melee":  2,
+		"ranged": 1,
+		"caster": 1,
+	},
+}
+
+// validRoleKeys is the allow-list of role keys a template may set counts for.
+// Anything else from an untrusted source (form input, JSON file) is dropped.
+func validRoleKeys() map[string]struct{} {
+	out := make(map[string]struct{}, len(stdComp))
+	for _, def := range stdComp {
+		out[def.role] = struct{}{}
+	}
+	return out
+}
+
 type Raid struct {
 	ID            string        `json:"id"`
 	GuildID       string        `json:"guild_id"`
@@ -188,13 +222,37 @@ func (r *Raid) findStatusEntry(userID string) *StatusEntry {
 }
 
 func newSlots() []Slot {
-	slots := make([]Slot, 0, 8)
+	return newSlotsFromTemplate(stdTemplate)
+}
+
+// newSlotsFromTemplate builds the per-raid Slots list from a template's
+// counts, iterating stdComp so the role order is stable (tank, healer,
+// melee, ranged, caster). Unknown roles in t.Counts are ignored — the
+// template store filters them on save, but be defensive in case of stale
+// JSON.
+func newSlotsFromTemplate(t RaidTemplate) []Slot {
+	total := 0
 	for _, def := range stdComp {
-		for range def.max {
+		total += t.Counts[def.role]
+	}
+	slots := make([]Slot, 0, total)
+	for _, def := range stdComp {
+		for i := 0; i < t.Counts[def.role]; i++ {
 			slots = append(slots, Slot{Role: def.role})
 		}
 	}
 	return slots
+}
+
+// maxByRole counts how many slots of each role a raid has. Used as the "max"
+// in the embed (filled/N) and the per-button disabled check, replacing the
+// previous hardcoded stdComp.max so custom-layout raids render correctly.
+func maxByRole(r *Raid) map[string]int {
+	out := map[string]int{}
+	for _, sl := range r.Slots {
+		out[sl.Role]++
+	}
+	return out
 }
 
 // ── Module ────────────────────────────────────────────────────────────────────
@@ -209,6 +267,10 @@ type Module struct {
 	// new raid. Empty entry = no ping role configured. Stored alongside
 	// raids in the same data file for atomic persistence.
 	pingRoles map[string]string
+
+	// templates[guildID][templateID] is a saved custom raid layout. The
+	// "standard" template is implicit (see stdTemplate) and never lives here.
+	templates map[string]map[string]RaidTemplate
 
 	// roleEmoji and jobEmoji are populated synchronously in OnLoad then never
 	// modified again, so they are safe to read from interaction handlers without mu.
@@ -230,7 +292,134 @@ func New(dataFile, appID string) *Module {
 		appID:     appID,
 		raids:     make(map[string]*Raid),
 		pingRoles: make(map[string]string),
+		templates: make(map[string]map[string]RaidTemplate),
 	}
+}
+
+// GuildTemplates returns every raid template available for a guild: the
+// built-in standard comp first, then any custom templates sorted by name.
+// Always returns a fresh slice so callers can mutate it safely.
+func (m *Module) GuildTemplates(guildID string) []RaidTemplate {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]RaidTemplate, 0, 1+len(m.templates[guildID]))
+	out = append(out, stdTemplate)
+	for _, t := range m.templates[guildID] {
+		out = append(out, t)
+	}
+	sort.Slice(out[1:], func(i, j int) bool {
+		return strings.ToLower(out[1+i].Name) < strings.ToLower(out[1+j].Name)
+	})
+	return out
+}
+
+// Template returns the template for a (guild, ID) pair, falling back to the
+// built-in standard comp when the ID is empty, "standard", or unknown.
+// Returning the standard template on miss keeps the create path simple — we
+// never have to handle "no template" downstream.
+func (m *Module) Template(guildID, id string) RaidTemplate {
+	if id == "" || id == stdTemplate.ID {
+		return stdTemplate
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if t, ok := m.templates[guildID][id]; ok {
+		return t
+	}
+	return stdTemplate
+}
+
+// AddTemplate validates and saves a custom template. Returns an error when
+// the input is unusable; the per-guild map is touched only on success.
+func (m *Module) AddTemplate(guildID string, t RaidTemplate) error {
+	t.ID = strings.TrimSpace(t.ID)
+	t.Name = strings.TrimSpace(t.Name)
+	if t.ID == "" {
+		t.ID = slugify(t.Name)
+	}
+	if t.ID == "" || t.Name == "" {
+		return fmt.Errorf("name and id required")
+	}
+	if t.ID == stdTemplate.ID {
+		return fmt.Errorf("id %q is reserved", stdTemplate.ID)
+	}
+
+	// Drop counts for unknown roles, drop zero/negative entries, sum the rest.
+	known := validRoleKeys()
+	cleaned := make(map[string]int, len(t.Counts))
+	total := 0
+	for k, v := range t.Counts {
+		if _, ok := known[k]; !ok {
+			continue
+		}
+		if v <= 0 {
+			continue
+		}
+		if v > 8 {
+			v = 8 // per-role cap — Discord button limits + sanity
+		}
+		cleaned[k] = v
+		total += v
+	}
+	if total == 0 {
+		return fmt.Errorf("template needs at least one slot")
+	}
+	if total > 24 {
+		return fmt.Errorf("template total of %d exceeds the 24-slot cap", total)
+	}
+	t.Counts = cleaned
+
+	m.mu.Lock()
+	if m.templates[guildID] == nil {
+		m.templates[guildID] = make(map[string]RaidTemplate)
+	}
+	m.templates[guildID][t.ID] = t
+	m.mu.Unlock()
+	m.save()
+	return nil
+}
+
+// DeleteTemplate removes a custom template. The standard template is
+// rejected — it's a constant, not stored, and "deleting" it makes no sense.
+func (m *Module) DeleteTemplate(guildID, id string) error {
+	if id == stdTemplate.ID {
+		return fmt.Errorf("cannot delete the standard template")
+	}
+	m.mu.Lock()
+	if _, ok := m.templates[guildID][id]; !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("template %q not found", id)
+	}
+	delete(m.templates[guildID], id)
+	if len(m.templates[guildID]) == 0 {
+		delete(m.templates, guildID)
+	}
+	m.mu.Unlock()
+	m.save()
+	return nil
+}
+
+// slugify converts a free-text name to a URL/form-safe identifier. Lowercase,
+// alphanumerics and hyphens only, no leading/trailing hyphen, max 32 chars.
+func slugify(s string) string {
+	var b strings.Builder
+	prevDash := true
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevDash = false
+		case r == ' ' || r == '-' || r == '_':
+			if !prevDash {
+				b.WriteByte('-')
+				prevDash = true
+			}
+		}
+		if b.Len() >= 32 {
+			break
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 // PingRoleID returns the configured "post-new-raid" ping role for a guild,
@@ -1146,9 +1335,15 @@ func (m *Module) buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 			filledByRole[sl.Role]++
 		}
 	}
+	roleMax := maxByRole(raid)
 
 	var fields []*discordgo.MessageEmbedField
 	for _, def := range stdComp {
+		// Skip roles the active raid template doesn't include — a "no healers"
+		// or "all DPS" comp shouldn't render an empty Healer field.
+		if roleMax[def.role] == 0 {
+			continue
+		}
 		icon := m.emojiText(def.role, def.fallback)
 		var lines []string
 		for _, sl := range raid.Slots {
@@ -1173,7 +1368,7 @@ func (m *Module) buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 			}
 		}
 		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   fmt.Sprintf("%s %s (%d/%d)", icon, def.label, filledByRole[def.role], def.max),
+			Name:   fmt.Sprintf("%s %s (%d/%d)", icon, def.label, filledByRole[def.role], roleMax[def.role]),
 			Value:  strings.Join(lines, "\n"),
 			Inline: true,
 		})
@@ -1229,7 +1424,10 @@ func (m *Module) buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 	}
 	if !raid.Closed {
 		for _, def := range stdComp {
-			if filledByRole[def.role] < def.max {
+			if roleMax[def.role] == 0 {
+				continue
+			}
+			if filledByRole[def.role] < roleMax[def.role] {
 				embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: def.iconURL}
 				break
 			}
@@ -1247,14 +1445,20 @@ func (m *Module) buildComponents(raid *Raid) []discordgo.MessageComponent {
 			filledByRole[sl.Role]++
 		}
 	}
+	roleMax := maxByRole(raid)
 
 	joinRow := make([]discordgo.MessageComponent, 0, len(stdComp))
 	for _, def := range stdComp {
+		// Skip the role entirely when the active template has zero slots for
+		// it — no button for a section that doesn't exist on this raid.
+		if roleMax[def.role] == 0 {
+			continue
+		}
 		btn := discordgo.Button{
 			Label:    def.label,
 			Style:    def.style,
 			CustomID: fmt.Sprintf("raid:join:%s:%s", raid.ID, def.role),
-			Disabled: filledByRole[def.role] >= def.max || raid.Closed,
+			Disabled: filledByRole[def.role] >= roleMax[def.role] || raid.Closed,
 		}
 		if e, ok := m.roleEmoji[def.role]; ok {
 			btn.Emoji = e
@@ -1289,8 +1493,9 @@ func (m *Module) buildComponents(raid *Raid) []discordgo.MessageComponent {
 // map[string]*Raid at the top level; load() falls back to that shape when
 // the wrapped version fails to parse, so a fresh deploy doesn't lose data.
 type persistedData struct {
-	Raids     map[string]*Raid  `json:"raids"`
-	PingRoles map[string]string `json:"ping_roles,omitempty"`
+	Raids     map[string]*Raid                   `json:"raids"`
+	PingRoles map[string]string                  `json:"ping_roles,omitempty"`
+	Templates map[string]map[string]RaidTemplate `json:"templates,omitempty"`
 }
 
 func (m *Module) save() {
@@ -1299,6 +1504,7 @@ func (m *Module) save() {
 	data, err := json.MarshalIndent(persistedData{
 		Raids:     m.raids,
 		PingRoles: m.pingRoles,
+		Templates: m.templates,
 	}, "", "  ")
 	if err != nil {
 		log.Printf("[raid] marshal error: %v", err)
@@ -1326,6 +1532,9 @@ func (m *Module) load() {
 		m.raids = pd.Raids
 		if pd.PingRoles != nil {
 			m.pingRoles = pd.PingRoles
+		}
+		if pd.Templates != nil {
+			m.templates = pd.Templates
 		}
 		return
 	}
@@ -1547,7 +1756,8 @@ func buildRaidView(r *Raid) RaidView {
 // AllowedMentions.Roles is scoped to the exact list so only the intended
 // roles get notified, even if Discord's defaults would normally fire every
 // mention in the content.
-func (m *Module) CreateRaidFromWeb(s *discordgo.Session, guildID, channelID, title, description string, unixTime int64, pingRoleIDs []string) error {
+func (m *Module) CreateRaidFromWeb(s *discordgo.Session, guildID, channelID, title, description string, unixTime int64, pingRoleIDs []string, templateID string) error {
+	tmpl := m.Template(guildID, templateID)
 	id := newID()
 	r := &Raid{
 		ID:          id,
@@ -1556,7 +1766,7 @@ func (m *Module) CreateRaidFromWeb(s *discordgo.Session, guildID, channelID, tit
 		Title:       title,
 		Description: description,
 		UnixTime:    unixTime,
-		Slots:       newSlots(),
+		Slots:       newSlotsFromTemplate(tmpl),
 	}
 
 	send := &discordgo.MessageSend{

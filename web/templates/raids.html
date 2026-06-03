@@ -14,6 +14,9 @@
   <div class="crumb">
     <a href="/dashboard" class="btn btn-ghost btn-sm">← Servers</a>
     <a href="/dashboard/server/{{ .Guild.ID }}" class="btn btn-ghost btn-sm">{{ .Guild.Name }}</a>
+    {{ if .IsAdmin }}
+    <a href="/dashboard/server/{{ .Guild.ID }}/raids/templates" class="btn btn-ghost btn-sm" style="margin-left:auto;">Manage templates</a>
+    {{ end }}
   </div>
 
   <div class="guild-header">
@@ -224,6 +227,15 @@
           <option value="">— select a channel —</option>
           {{ range .Channels }}
           <option value="{{ .ID }}">#{{ .Name }}</option>
+          {{ end }}
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label for="raid-template">Composition</label>
+        <select name="template" id="raid-template" class="form-select">
+          {{ range .Templates }}
+          <option value="{{ .ID }}">{{ .Name }}</option>
           {{ end }}
         </select>
       </div>
