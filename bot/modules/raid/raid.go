@@ -1475,8 +1475,11 @@ func (m *Module) GuildRaids(guildID string) []RaidView {
 	return views
 }
 
-// CloseRaid closes sign-ups for a raid by ID. Returns false if not found or already closed.
-func (m *Module) CloseRaid(guildID, raidID string) bool {
+// CloseRaid closes sign-ups for a raid by ID. Returns false if not found or
+// already closed. When s is non-nil, the Discord message is also edited to
+// the closed embed + closed-state components so the channel reflects the
+// new state — matches what /raid close does on the bot side.
+func (m *Module) CloseRaid(s *discordgo.Session, guildID, raidID string) bool {
 	m.mu.Lock()
 	r, ok := m.raids[raidID]
 	if !ok || r.GuildID != guildID || r.Closed {
@@ -1484,8 +1487,28 @@ func (m *Module) CloseRaid(guildID, raidID string) bool {
 		return false
 	}
 	r.Closed = true
+	// Build the new render under the lock so we capture a consistent snapshot,
+	// then drop the lock before doing the network call.
+	embed := m.buildEmbed(r)
+	components := m.buildComponents(r)
+	channelID, messageID := r.ChannelID, r.MessageID
 	m.mu.Unlock()
 	m.save()
+
+	if s != nil && channelID != "" && messageID != "" {
+		if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel:    channelID,
+			ID:         messageID,
+			Embeds:     &[]*discordgo.MessageEmbed{embed},
+			Components: &components,
+		}); err != nil {
+			// Local state is already updated and persisted; a failed edit just
+			// means the channel still shows the old embed. Log and move on so
+			// the dashboard caller still reports success for the close itself.
+			log.Printf("[raid] close %s: failed to edit Discord message %s/%s: %v",
+				raidID, channelID, messageID, err)
+		}
+	}
 	return true
 }
 

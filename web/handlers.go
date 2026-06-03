@@ -1215,7 +1215,9 @@ func (s *Server) handleCloseRaidWeb(c *gin.Context) {
 	raidID := c.Param("raidID")
 	if mod, ok := s.bot.Modules()["raid"]; ok {
 		if rm, ok := mod.(*raid.Module); ok {
-			rm.CloseRaid(guildID, raidID)
+			// Pass the session so the Discord message gets edited to the
+			// closed state, not just the local store.
+			rm.CloseRaid(s.bot.Session(), guildID, raidID)
 		}
 	}
 
