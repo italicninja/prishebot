@@ -370,6 +370,19 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			return
 		}
 
+	case discordgo.InteractionModalSubmit:
+		// Same convention as components — module name is the customID prefix.
+		// Lets a module flow from /command -> modal -> submit without us
+		// needing per-module routing code here.
+		customID := i.ModalSubmitData().CustomID
+		prefix, _, _ := strings.Cut(customID, ":")
+		b.mu.RLock()
+		m, ok = b.modules[prefix]
+		b.mu.RUnlock()
+		if !ok {
+			return
+		}
+
 	default:
 		return
 	}
@@ -377,8 +390,11 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 	// Guild-specific enable/disable check. DM interactions have no GuildID.
 	if i.GuildID != "" && !b.IsModuleEnabled(i.GuildID, m.Name()) {
 		// Autocomplete and component interactions can't receive a plain message — drop silently.
+		// Modal submits CAN respond, but a "module just got disabled" mid-flow
+		// is rare enough to keep behaviour consistent with components.
 		if i.Type == discordgo.InteractionApplicationCommandAutocomplete ||
-			i.Type == discordgo.InteractionMessageComponent {
+			i.Type == discordgo.InteractionMessageComponent ||
+			i.Type == discordgo.InteractionModalSubmit {
 			return
 		}
 		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{

@@ -16,6 +16,7 @@ import (
 	"github.com/user/discord-bot-skeleton/bot/modules/info"
 	"github.com/user/discord-bot-skeleton/bot/modules/meow"
 	"github.com/user/discord-bot-skeleton/bot/modules/ping"
+	"github.com/user/discord-bot-skeleton/bot/modules/post"
 	"github.com/user/discord-bot-skeleton/bot/modules/raid"
 	"github.com/user/discord-bot-skeleton/bot/modules/roles"
 	"github.com/user/discord-bot-skeleton/config"
@@ -113,6 +114,9 @@ func main() {
 	}
 	if err := b.LoadModule(meow.New()); err != nil {
 		log.Fatalf("failed to load meow module: %v", err)
+	}
+	if err := b.LoadModule(post.New()); err != nil {
+		log.Fatalf("failed to load post module: %v", err)
 	}
 
 	if err := b.Start(); err != nil {
