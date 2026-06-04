@@ -1,4 +1,4 @@
-/* Prishe — Dashboard
+/* Prishe - Dashboard
    Dark default. [data-theme="light"] overrides for light mode. */
 
 /* ── Tokens ───────────────────────────────────────────────────────────────── */
@@ -1097,7 +1097,7 @@ code {
 }
 .lp-cta-secondary:hover { border-color: var(--accent); text-decoration: none; }
 
-/* Sections — generous vertical rhythm, optional alt background. */
+/* Sections - generous vertical rhythm, optional alt background. */
 .lp-section {
   padding: 5rem 1.5rem;
 }
@@ -1177,7 +1177,7 @@ code {
   font-size: 0.95rem;
 }
 
-/* Features list — text-heavy, no card grid. */
+/* Features list - text-heavy, no card grid. */
 .lp-features-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -1204,7 +1204,7 @@ code {
   font-size: 0.85em;
 }
 
-/* Developer note — looser, narrative typography. */
+/* Developer note - looser, narrative typography. */
 .lp-about p {
   color: var(--muted);
   font-size: 1.05rem;

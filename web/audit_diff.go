@@ -4,7 +4,7 @@
 // Output format is a Discord-flavoured markdown string ready to drop into an
 // embed description: bold section headers, bullet lines, role and channel
 // references rendered with Discord's <@&id> / <#id> syntax so they render as
-// clickable mentions. Mentions are rendered safely — the audit message
+// clickable mentions. Mentions are rendered safely - the audit message
 // suppresses the ping with allowed_mentions (see audit.go).
 package web
 
@@ -89,10 +89,10 @@ type moduleSaveDiffInput struct {
 	AfterChGlobal     []string
 	BeforeChModule    map[string][]string // map[moduleName]channelIDs
 	AfterChModule     map[string][]string
-	ShowModRoles      bool // admin submitted — moderator_roles is in scope
+	ShowModRoles      bool // admin submitted - moderator_roles is in scope
 	BeforeModRoles    []string
 	AfterModRoles     []string
-	ShowAuditChannel  bool // owner submitted — audit_channel is in scope
+	ShowAuditChannel  bool // owner submitted - audit_channel is in scope
 	BeforeAuditChan   string
 	AfterAuditChan    string
 }
@@ -142,7 +142,7 @@ func buildModuleSaveDiff(in moduleSaveDiffInput) string {
 	// ── Global channel allow-list ─────────────────────────────────────────
 	if added, removed := diffStringSet(in.BeforeChGlobal, in.AfterChGlobal); len(added)+len(removed) > 0 {
 		seg := addRemoveLine(channelMentions(added), channelMentions(removed))
-		sections = append(sections, "**Channels — global**\n• "+seg)
+		sections = append(sections, "**Channels - global**\n• "+seg)
 	}
 
 	// ── Per-module channel allow-lists ────────────────────────────────────
@@ -156,7 +156,7 @@ func buildModuleSaveDiff(in moduleSaveDiffInput) string {
 		modChLines = append(modChLines, "• `"+name+"`: "+seg)
 	}
 	if len(modChLines) > 0 {
-		sections = append(sections, "**Channels — per module**\n"+strings.Join(modChLines, "\n"))
+		sections = append(sections, "**Channels - per module**\n"+strings.Join(modChLines, "\n"))
 	}
 
 	// ── Dashboard moderators (admin-scoped field) ─────────────────────────
@@ -174,7 +174,7 @@ func buildModuleSaveDiff(in moduleSaveDiffInput) string {
 		case in.BeforeAuditChan == "":
 			line = "set to <#" + in.AfterAuditChan + ">"
 		case in.AfterAuditChan == "":
-			line = "cleared (was <#" + in.BeforeAuditChan + ">) — auditing now disabled"
+			line = "cleared (was <#" + in.BeforeAuditChan + ">) - auditing now disabled"
 		default:
 			line = "<#" + in.BeforeAuditChan + "> → <#" + in.AfterAuditChan + ">"
 		}

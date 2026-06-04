@@ -3,8 +3,8 @@
 // An admin opens the server page and designates one or more roles as
 // "dashboard moderator" roles. Any member who holds at least one of those
 // roles can sign in and manage the day-to-day pages (raids, birthdays, the
-// self-assignable role list) for that server. Destructive actions — removing
-// the bot, changing module enablement, editing the moderator list itself —
+// self-assignable role list) for that server. Destructive actions - removing
+// the bot, changing module enablement, editing the moderator list itself -
 // stay restricted to Discord-level admins.
 package bot
 
@@ -17,7 +17,7 @@ import (
 )
 
 // ModeratorRoles stores the per-guild dashboard-moderator role allow-list.
-// A missing or empty entry means "no moderators — admins only".
+// A missing or empty entry means "no moderators - admins only".
 type ModeratorRoles struct {
 	file string
 
@@ -27,7 +27,7 @@ type ModeratorRoles struct {
 }
 
 // NewModeratorRoles constructs the store and loads any persisted state.
-// A read error other than "file not found" is logged but not fatal — we'd
+// A read error other than "file not found" is logged but not fatal - we'd
 // rather start with an empty state than refuse to boot.
 func NewModeratorRoles(file string) *ModeratorRoles {
 	mr := &ModeratorRoles{file: file, roles: make(map[string][]string)}

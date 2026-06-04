@@ -47,7 +47,7 @@ type Bot struct {
 	commandPerms *CommandPermissions
 
 	// channelPerms enforces per-guild channel allow-lists on slash commands.
-	// Empty allow-lists at every layer mean "all channels" — the default.
+	// Empty allow-lists at every layer mean "all channels" - the default.
 	channelPerms *ChannelPermissions
 
 	// moderatorRoles tracks which Discord roles grant non-admin users access
@@ -71,13 +71,13 @@ func New(cfg *config.Config) (*Bot, error) {
 	}
 
 	// Intents declare which Gateway events Discord will send us.
-	// Only request what you need — more intents mean more events and more
+	// Only request what you need - more intents mean more events and more
 	// potential for rate limiting. Modules that need additional intents
 	// (e.g. voice, DMs) should document that requirement.
 	//
-	// IntentsGuilds       — required for slash command routing.
-	// IntentsGuildMessages — required for MessageCreate events (e.g. the meow module).
-	// IntentsMessageContent — required to read the text of those messages.
+	// IntentsGuilds       - required for slash command routing.
+	// IntentsGuildMessages - required for MessageCreate events (e.g. the meow module).
+	// IntentsMessageContent - required to read the text of those messages.
 	//   This is a PRIVILEGED intent: it must be enabled in the Discord developer
 	//   portal for any bot in 100+ servers, and is recommended for everyone.
 	//   Without it, message-content fields arrive empty and message-listening
@@ -133,13 +133,13 @@ func (b *Bot) Start() error {
 
 // applyBotDescription pushes BotDescription (env BOT_DESCRIPTION) to the
 // bot's Discord application profile so the "About Me" stays in sync with
-// what's deployed. Failures are logged but non-fatal — the bot is fully
+// what's deployed. Failures are logged but non-fatal - the bot is fully
 // usable without an updated profile description.
 //
 // Why not session.ApplicationUpdate? That helper hits PATCH /applications/{id},
 // which Discord rejects for bot tokens with 403 "Bots cannot use this endpoint".
 // The bot-accessible endpoint is PATCH /applications/@me, which discordgo
-// v0.29 doesn't wrap — so we make a direct HTTP call with bot auth.
+// v0.29 doesn't wrap - so we make a direct HTTP call with bot auth.
 func (b *Bot) applyBotDescription() {
 	if b.cfg.BotDescription == "" {
 		return
@@ -371,7 +371,7 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		}
 
 	case discordgo.InteractionModalSubmit:
-		// Same convention as components — module name is the customID prefix.
+		// Same convention as components - module name is the customID prefix.
 		// Lets a module flow from /command -> modal -> submit without us
 		// needing per-module routing code here.
 		customID := i.ModalSubmitData().CustomID
@@ -389,7 +389,7 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 
 	// Guild-specific enable/disable check. DM interactions have no GuildID.
 	if i.GuildID != "" && !b.IsModuleEnabled(i.GuildID, m.Name()) {
-		// Autocomplete and component interactions can't receive a plain message — drop silently.
+		// Autocomplete and component interactions can't receive a plain message - drop silently.
 		// Modal submits CAN respond, but a "module just got disabled" mid-flow
 		// is rare enough to keep behaviour consistent with components.
 		if i.Type == discordgo.InteractionApplicationCommandAutocomplete ||
@@ -409,7 +409,7 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 
-	// Per-guild role-lock gate. Applies to slash command invocations only —
+	// Per-guild role-lock gate. Applies to slash command invocations only -
 	// component clicks (e.g. raid Join buttons) and autocomplete fall through
 	// so a role-locked /raid create still lets regular members sign up.
 	if i.Type == discordgo.InteractionApplicationCommand && i.GuildID != "" {

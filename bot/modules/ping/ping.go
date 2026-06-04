@@ -1,4 +1,4 @@
-// Package ping is the simplest possible module — it responds to /ping with
+// Package ping is the simplest possible module - it responds to /ping with
 // "Pong!". Use it as a copy-paste template when building new modules.
 package ping
 

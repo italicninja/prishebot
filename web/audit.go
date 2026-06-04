@@ -16,7 +16,7 @@ const auditColor = 0x9B59B6
 
 // postAudit sends an audit embed for a config change to the guild's
 // configured audit channel. No-op when auditing isn't enabled for the guild
-// or when the bot can't post (channel deleted, missing permissions, etc. —
+// or when the bot can't post (channel deleted, missing permissions, etc. -
 // logged but never bubbled up to the user, since the config save itself
 // already succeeded by the time this runs).
 func (s *Server) postAudit(guildID string, sess *Session, action, summary string) {
@@ -37,7 +37,7 @@ func (s *Server) postAudit(guildID string, sess *Session, action, summary string
 		},
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-	// Suppress pings — the diff description embeds <@&roleID> / <#channelID>
+	// Suppress pings - the diff description embeds <@&roleID> / <#channelID>
 	// references for readability, and we don't want every save to ping
 	// everyone in those roles. Empty Parse means "no mention types are
 	// allowed to ping" without disabling mention rendering itself.

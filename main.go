@@ -55,7 +55,7 @@ func main() {
 	if err := b.LoadModule(ping.New()); err != nil {
 		log.Fatalf("failed to load ping module: %v", err)
 	}
-	// Closure powers /modules — captures `b` so it sees the full module
+	// Closure powers /modules - captures `b` so it sees the full module
 	// roster once every module has finished loading.
 	listModules := func(guildID string) []info.ModuleListing {
 		settings := b.GuildModuleSettings(guildID)
@@ -79,7 +79,7 @@ func main() {
 		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 		return out
 	}
-	// Closure powers /help — iterates every loaded module's command list
+	// Closure powers /help - iterates every loaded module's command list
 	// at request time so a closure works regardless of module load order.
 	allCommands := func(guildID string) []info.CommandHelp {
 		settings := b.GuildModuleSettings(guildID)

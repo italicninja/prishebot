@@ -28,9 +28,9 @@ type Server struct {
 func NewServer(cfg *config.Config, b *bot.Bot) *Server {
 	// Configure the Discord OAuth2 client.
 	// Scopes:
-	//   "identify"                                  — read username, avatar, discriminator
-	//   "guilds"                                    — list the user's servers (and their permissions)
-	//   "applications.commands.permissions.update"  — push per-guild slash-command
+	//   "identify"                                  - read username, avatar, discriminator
+	//   "guilds"                                    - list the user's servers (and their permissions)
+	//   "applications.commands.permissions.update"  - push per-guild slash-command
 	//      visibility overrides on behalf of the logged-in admin, so the
 	//      dashboard's role allow-list also controls who sees the command in
 	//      Discord's slash menu (not just runtime enforcement)
@@ -87,7 +87,7 @@ func (s *Server) routes() *gin.Engine {
 
 	// ── Health ──────────────────────────────────────────────────────────────
 	// Railway (and any load balancer) polls this path. It must respond 200
-	// immediately — do not gate it behind module load or Discord connectivity.
+	// immediately - do not gate it behind module load or Discord connectivity.
 	r.GET("/health", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	// ── Public ──────────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ func (s *Server) routes() *gin.Engine {
 	r.GET("/auth/callback", s.handleCallback)
 	r.GET("/logout", s.handleLogout)
 
-	// ── Protected — requires a valid session ─────────────────────────────────
+	// ── Protected - requires a valid session ─────────────────────────────────
 	// gin.RouterGroup lets us apply the requireAuth middleware to a set of
 	// routes without repeating it on every handler.
 	dash := r.Group("/dashboard")

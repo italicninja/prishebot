@@ -3,7 +3,7 @@
 //
 // Requires the bot to be running with the IntentsGuildMessages and the
 // privileged IntentsMessageContent intents. The latter must be enabled in
-// the Discord developer portal — without it Discord delivers messages with
+// the Discord developer portal - without it Discord delivers messages with
 // empty content and this module silently does nothing.
 package meow
 
@@ -44,7 +44,7 @@ func (m *Module) OnUnload(_ *discordgo.Session) error {
 
 // HandleMessage is dispatched by the bot core for every guild message after
 // the module-enable and channel-allow gates pass. We only reply when the
-// trimmed message text is exactly "meow" — no leading prose, no trailing
+// trimmed message text is exactly "meow" - no leading prose, no trailing
 // punctuation, no embeds-with-text dressed up as a meow.
 func (m *Module) HandleMessage(s *discordgo.Session, msg *discordgo.MessageCreate) {
 	if msg.GuildID == "" {

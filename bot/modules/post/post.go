@@ -14,7 +14,7 @@
 //
 // When the modal's Title field is empty, the post is plain text. When it's
 // set, the post becomes an embed with that title and the content as the
-// description — better for longer rules/info posts.
+// description - better for longer rules/info posts.
 package post
 
 import (
@@ -27,7 +27,7 @@ import (
 	"github.com/user/discord-bot-skeleton/bot"
 )
 
-// embedColor matches the dashboard accent — Prishe-purple.
+// embedColor matches the dashboard accent - Prishe-purple.
 const embedColor = 0x9B59B6
 
 // Module implements bot.Module for the /post slash command.
@@ -94,7 +94,7 @@ func (m *Module) Commands() []*discordgo.ApplicationCommand {
 						{
 							Type:        discordgo.ApplicationCommandOptionString,
 							Name:        "message_id",
-							Description: "Message ID (right-click → Copy Message ID — needs developer mode)",
+							Description: "Message ID (right-click → Copy Message ID - needs developer mode)",
 							Required:    true,
 						},
 						{
@@ -160,7 +160,7 @@ func (m *Module) openEditModal(s *discordgo.Session, i *discordgo.InteractionCre
 	// instead of opening an empty modal that would silently fail on submit.
 	msg, err := s.ChannelMessage(channelID, messageID)
 	if err != nil {
-		respondEphemeral(s, i, "Couldn't fetch that message — check the ID and channel, and make sure Prishe has access.")
+		respondEphemeral(s, i, "Couldn't fetch that message - check the ID and channel, and make sure Prishe has access.")
 		return
 	}
 	if msg.Author == nil || msg.Author.ID != s.State.User.ID {
@@ -185,7 +185,7 @@ func (m *Module) showModal(s *discordgo.Session, i *discordgo.InteractionCreate,
 				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 					discordgo.TextInput{
 						CustomID:  "title",
-						Label:     "Title (optional — renders as an embed)",
+						Label:     "Title (optional - renders as an embed)",
 						Style:     discordgo.TextInputShort,
 						MaxLength: 256,
 						Required:  false,
@@ -238,7 +238,7 @@ func (m *Module) handleModalSubmit(s *discordgo.Session, i *discordgo.Interactio
 	case "edit":
 		// post:edit:<channelID>:<messageID>[:<mentionID>]
 		if len(parts) < 4 {
-			respondEphemeral(s, i, "Couldn't recover the message ID — please try /post edit again.")
+			respondEphemeral(s, i, "Couldn't recover the message ID - please try /post edit again.")
 			return
 		}
 		channelID, messageID := parts[2], parts[3]
@@ -255,10 +255,10 @@ func (m *Module) sendCreate(s *discordgo.Session, i *discordgo.InteractionCreate
 	msg, err := s.ChannelMessageSendComplex(channelID, send)
 	if err != nil {
 		log.Printf("[post] send to %s: %v", channelID, err)
-		respondEphemeral(s, i, "Couldn't post — make sure Prishe has permission to send messages in that channel.")
+		respondEphemeral(s, i, "Couldn't post - make sure Prishe has permission to send messages in that channel.")
 		return
 	}
-	respondEphemeral(s, i, fmt.Sprintf("✅ Posted in <#%s>. Message ID `%s` — use `/post edit` with that ID to update it later.",
+	respondEphemeral(s, i, fmt.Sprintf("✅ Posted in <#%s>. Message ID `%s` - use `/post edit` with that ID to update it later.",
 		channelID, msg.ID))
 }
 
@@ -266,7 +266,7 @@ func (m *Module) sendEdit(s *discordgo.Session, i *discordgo.InteractionCreate, 
 	edit := buildMessageEdit(channelID, messageID, mentionID, title, content)
 	if _, err := s.ChannelMessageEditComplex(edit); err != nil {
 		log.Printf("[post] edit %s/%s: %v", channelID, messageID, err)
-		respondEphemeral(s, i, "Couldn't edit that message — check the ID and make sure Prishe still has access.")
+		respondEphemeral(s, i, "Couldn't edit that message - check the ID and make sure Prishe still has access.")
 		return
 	}
 	respondEphemeral(s, i, fmt.Sprintf("✅ Updated the post in <#%s>.", channelID))
@@ -331,7 +331,7 @@ func extractPostFields(msg *discordgo.Message) (title, content string) {
 
 // stripLeadingRoleMentions removes any leading "<@&id>" tokens and the space
 // that follows them. Used when pre-filling the content of a plain message
-// that was originally posted with a mention — the mention is reconstructed
+// that was originally posted with a mention - the mention is reconstructed
 // on submit from the per-edit "mention" option, so we shouldn't show it
 // twice in the editor.
 func stripLeadingRoleMentions(s string) string {
@@ -341,7 +341,7 @@ func stripLeadingRoleMentions(s string) string {
 		if end < 0 {
 			break
 		}
-		// Validate the inner text is digits — otherwise it's some other
+		// Validate the inner text is digits - otherwise it's some other
 		// kind of mention or just text that happens to start with "<@&".
 		inner := trimmed[3:end]
 		if _, err := strconv.ParseUint(inner, 10, 64); err != nil {
@@ -421,7 +421,7 @@ func leadingSpacer(content string, embeds any) string {
 }
 
 // respondEphemeral sends a private confirmation visible only to the invoker.
-// Used for both success and error paths after a modal — Discord requires the
+// Used for both success and error paths after a modal - Discord requires the
 // modal-submit interaction to be acknowledged, and ephemeral is the right
 // channel for "post sent" feedback that nobody else needs to see.
 func respondEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {

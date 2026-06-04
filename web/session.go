@@ -15,13 +15,13 @@ type Session struct {
 	Username    string
 	AvatarURL   string
 	AccessToken string  // Discord OAuth2 token (used for future API calls)
-	Guilds      []Guild // Visible servers — REBUILT from RawGuilds on each /dashboard render
+	Guilds      []Guild // Visible servers - REBUILT from RawGuilds on each /dashboard render
 
 	// RawGuilds is the unfiltered partial-guild list Discord returned for this
 	// user (/users/@me/guilds). We keep it so we can rebuild Guilds on every
 	// dashboard render: if the bot wasn't connected when the session was
-	// created — Railway healthcheck starts the web server before the bot
-	// finishes module load — the original computation would silently drop
+	// created - Railway healthcheck starts the web server before the bot
+	// finishes module load - the original computation would silently drop
 	// moderator-eligible guilds. Rebuilding fixes that as soon as the bot
 	// catches up, with no re-login needed.
 	RawGuilds []discordGuild
@@ -43,7 +43,7 @@ type Guild struct {
 	Name       string
 	IconURL    string
 	BotPresent bool   // true if the bot is already a member of this server
-	Role       string // RoleAdmin or RoleModerator — how the user reached this guild
+	Role       string // RoleAdmin or RoleModerator - how the user reached this guild
 	IsOwner    bool   // true if this user is the Discord server owner (strictly stronger than admin)
 }
 

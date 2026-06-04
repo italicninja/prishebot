@@ -59,7 +59,7 @@ func (s *Server) handleCallback(c *gin.Context) {
 	// 1. Verify CSRF state using constant-time comparison to prevent timing attacks.
 	stateCookie, err := c.Cookie("oauth_state")
 	if err != nil || subtle.ConstantTimeCompare([]byte(stateCookie), []byte(c.Query("state"))) != 1 {
-		c.String(http.StatusBadRequest, "Invalid OAuth state — possible CSRF attempt.")
+		c.String(http.StatusBadRequest, "Invalid OAuth state - possible CSRF attempt.")
 		return
 	}
 
@@ -92,7 +92,7 @@ func (s *Server) handleCallback(c *gin.Context) {
 	}
 
 	// 4. Derive the visible guild list from the raw list. Stored in session
-	// AND on rebuild during every /dashboard render — keeps things working
+	// AND on rebuild during every /dashboard render - keeps things working
 	// if the bot wasn't connected at OAuth time (Railway healthcheck starts
 	// the web server before module load finishes).
 	guilds := s.buildVisibleGuilds(rawGuilds, user.ID)
@@ -311,7 +311,7 @@ func (s *Server) handleLeaveServer(c *gin.Context) {
 		return
 	}
 
-	// Post the audit log BEFORE leaving — the channel send needs the bot to
+	// Post the audit log BEFORE leaving - the channel send needs the bot to
 	// still be a member of the guild.
 	s.postAudit(guildID, sess, "Bot removed from server",
 		"The dashboard owner triggered the bot to leave this server. Future settings changes will not be possible until the bot is re-invited.")
@@ -327,8 +327,8 @@ func (s *Server) handleLeaveServer(c *gin.Context) {
 
 // handleUpdateModules processes the combined module-and-permissions form on
 // the server page. The form posts:
-//   - module_<name>            — checkbox per enabled module
-//   - roles_<commandName>      — zero or more role IDs per command
+//   - module_<name>            - checkbox per enabled module
+//   - roles_<commandName>      - zero or more role IDs per command
 func (s *Server) handleUpdateModules(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
@@ -450,7 +450,7 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 	}
 
 	// Pass any sync warning forward so the dashboard can show a banner. The
-	// dashboard config is already saved at this point — we just want the
+	// dashboard config is already saved at this point - we just want the
 	// admin to know that Discord-side slash menu visibility may not match
 	// what they see in the UI.
 	redirect := "/dashboard/server/" + guildID + "?saved=1"
@@ -468,7 +468,7 @@ func (s *Server) handleUpdateModules(c *gin.Context) {
 // applications.commands.permissions.update scope) to fix divergence between
 // what the dashboard shows and what Discord's slash menu enforces.
 //
-// Admin-only: same trust boundary as handleUpdateModules — pushing overrides
+// Admin-only: same trust boundary as handleUpdateModules - pushing overrides
 // to Discord requires ManageGuild and the per-guild config is admin-owned.
 func (s *Server) handleResyncCommandPerms(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
@@ -498,7 +498,7 @@ func (s *Server) handleResyncCommandPerms(c *gin.Context) {
 	}
 
 	s.postAudit(guildID, sess, "Slash-menu permissions resynced",
-		"Re-pushed the saved command role allow-lists to Discord — "+strconv.Itoa(ok)+" command(s) succeeded, "+strconv.Itoa(failed)+" failed.")
+		"Re-pushed the saved command role allow-lists to Discord - "+strconv.Itoa(ok)+" command(s) succeeded, "+strconv.Itoa(failed)+" failed.")
 
 	redirect := "/dashboard/server/" + guildID + "?resync=" + strconv.Itoa(ok)
 	if unauthorized > 0 {
@@ -548,7 +548,7 @@ func findGuild(guilds []Guild, id string) *Guild {
 
 // requireGuildAccess resolves the session's entry for guildID and applies the
 // role gate. Returns nil after writing a 403 if access is denied. When
-// adminOnly is true, moderators are also rejected — use it on destructive
+// adminOnly is true, moderators are also rejected - use it on destructive
 // routes (leave-server, module enablement, edit moderator-role list).
 func requireGuildAccess(c *gin.Context, sess *Session, guildID string, adminOnly bool) *Guild {
 	g := findGuild(sess.Guilds, guildID)
@@ -577,7 +577,7 @@ func (s *Server) botGuildSet() map[string]bool {
 // buildVisibleGuilds turns a raw /users/@me/guilds payload into the dashboard
 // guild list, applying the same admin / moderator rules used at login time
 // but against live bot state. Called at OAuth callback AND on every
-// /dashboard render — recomputing each time keeps the list correct when the
+// /dashboard render - recomputing each time keeps the list correct when the
 // bot wasn't ready at login or has since reconnected/joined/left a guild.
 //
 // For non-admin guilds, this issues one GuildMember API call per moderator-
@@ -808,7 +808,7 @@ func (s *Server) handleDeleteRole(c *gin.Context) {
 }
 
 // randomState produces a URL-safe random string used as OAuth2 CSRF state.
-// crypto/rand (not math/rand) is essential here — math/rand is predictable.
+// crypto/rand (not math/rand) is essential here - math/rand is predictable.
 func randomState() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -901,7 +901,7 @@ func (s *Server) handleBirthdaySettingsPage(c *gin.Context) {
 	case "invalid":
 		errMsg = "The file doesn't appear to be a valid GIF."
 	case "wish_failed":
-		errMsg = "Failed to send the birthday wish — check the bot log. Make sure an announcement channel is configured."
+		errMsg = "Failed to send the birthday wish - check the bot log. Make sure an announcement channel is configured."
 	case "birthday_unavailable":
 		errMsg = "The birthday module isn't loaded."
 	}
@@ -1162,7 +1162,7 @@ func (s *Server) handleRaidsPage(c *gin.Context) {
 	}
 
 	// Role picker for the ping-role admin section. JSON-encoded for the
-	// chip multi-select widget (window.PRISHE_ROLES) — same shape used on
+	// chip multi-select widget (window.PRISHE_ROLES) - same shape used on
 	// the server page.
 	type RoleOption struct {
 		ID       string `json:"id"`
@@ -1249,7 +1249,7 @@ func (s *Server) handleCreateRaidWeb(c *gin.Context) {
 		return
 	}
 
-	// datetime-local value: "2026-04-30T20:00" — treat as UTC.
+	// datetime-local value: "2026-04-30T20:00" - treat as UTC.
 	var unixTime int64
 	if dt := strings.TrimSpace(c.PostForm("datetime")); dt != "" {
 		if t, err := time.Parse("2006-01-02T15:04", dt); err == nil {
@@ -1263,7 +1263,7 @@ func (s *Server) handleCreateRaidWeb(c *gin.Context) {
 	// add or remove freely for this specific raid.
 	pingRoleIDs := cleanIDs(c.PostFormArray("ping_roles"))
 
-	// Composition template — "standard" / "" both resolve to the built-in
+	// Composition template - "standard" / "" both resolve to the built-in
 	// 2T/2H/2M/1R/1C layout inside the module.
 	templateID := strings.TrimSpace(c.PostForm("template"))
 
@@ -1282,7 +1282,7 @@ func (s *Server) handleCreateRaidWeb(c *gin.Context) {
 
 // handleRaidTemplatesPage renders the admin-only page for managing custom
 // raid composition templates. The "standard" template is always shown at the
-// top as read-only — it can't be edited or deleted.
+// top as read-only - it can't be edited or deleted.
 func (s *Server) handleRaidTemplatesPage(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
@@ -1353,7 +1353,7 @@ func (s *Server) handleRaidTemplatesPage(c *gin.Context) {
 }
 
 // handleCreateRaidTemplate accepts a new custom template from the form.
-// Admin-only — same trust level as the rest of the raid settings UI.
+// Admin-only - same trust level as the rest of the raid settings UI.
 func (s *Server) handleCreateRaidTemplate(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
 	guildID := c.Param("id")
@@ -1373,7 +1373,7 @@ func (s *Server) handleCreateRaidTemplate(c *gin.Context) {
 		Counts: map[string]int{},
 	}
 	// The form posts one (kind, count) pair per slot row via parallel arrays
-	// named "kinds" and "counts". We zip them by index — the module then
+	// named "kinds" and "counts". We zip them by index - the module then
 	// drops unknown keys, zero/negative counts, and rejects empty templates.
 	kinds := c.PostFormArray("kinds")
 	counts := c.PostFormArray("counts")
@@ -1434,7 +1434,7 @@ func (s *Server) handleDeleteRaidTemplate(c *gin.Context) {
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids/templates?deleted=1")
 }
 
-// handleUpdateRaidPingRole stores the per-guild raid ping role. Admin-only —
+// handleUpdateRaidPingRole stores the per-guild raid ping role. Admin-only -
 // the same trust level as the rest of the role-permission UI.
 func (s *Server) handleUpdateRaidPingRole(c *gin.Context) {
 	sess := c.MustGet("session").(*Session)
@@ -1450,7 +1450,7 @@ func (s *Server) handleUpdateRaidPingRole(c *gin.Context) {
 		return
 	}
 
-	// Field is wired through the chip multi-select with data-max="1" —
+	// Field is wired through the chip multi-select with data-max="1" -
 	// c.PostForm returns the empty string when no role is picked, which
 	// clears the setting (i.e. disables raid pings for this guild).
 	//
@@ -1468,7 +1468,7 @@ func (s *Server) handleUpdateRaidPingRole(c *gin.Context) {
 		case before == "":
 			line = "Set to <@&" + after + ">"
 		case after == "":
-			line = "Cleared (was <@&" + before + ">) — raid pings disabled"
+			line = "Cleared (was <@&" + before + ">) - raid pings disabled"
 		default:
 			line = "<@&" + before + "> → <@&" + after + ">"
 		}
@@ -1544,7 +1544,7 @@ func buildSigs(prefix string, opts []*discordgo.ApplicationCommandOption) []stri
 		return out
 	}
 
-	// Leaf command — append required then optional parameters.
+	// Leaf command - append required then optional parameters.
 	var sb strings.Builder
 	sb.WriteString(prefix)
 	for _, o := range opts {

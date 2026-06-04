@@ -21,7 +21,7 @@ const (
 
 // Module is the interface every bot module must implement.
 //
-// A module is a self-contained feature bundle — it owns its own slash commands
+// A module is a self-contained feature bundle - it owns its own slash commands
 // and event handling logic. The bot core manages loading/unloading modules,
 // registering their commands with Discord's API, and routing interactions to
 // the right module automatically.

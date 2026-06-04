@@ -65,7 +65,7 @@ jobs:
 
           HASH=$(git rev-parse --short "$TAG")
 
-          # Discord embed description maxes out at 4096 chars — leave headroom.
+          # Discord embed description maxes out at 4096 chars - leave headroom.
           if [ "${#BODY}" -gt 4000 ]; then
             BODY="${BODY:0:4000}…"
           fi
@@ -103,7 +103,7 @@ jobs:
             exit 1
           fi
 
-          # 0x9B59B6 (Discord-friendly purple) — change the color int if you prefer.
+          # 0x9B59B6 (Discord-friendly purple) - change the color int if you prefer.
           payload=$(jq -n \
             --arg title    "🚀 $NAME" \
             --arg desc     "$BODY" \

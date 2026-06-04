@@ -15,7 +15,7 @@ import (
 func (s *Server) requireAuth(c *gin.Context) {
 	sess := s.sessionFromCookie(c)
 	if sess == nil {
-		// Not logged in — redirect to the homepage (login page).
+		// Not logged in - redirect to the homepage (login page).
 		// We use 302 (Found / temporary redirect) rather than 401 because
 		// this is a browser-facing UI, not an API.
 		c.Redirect(http.StatusFound, "/")

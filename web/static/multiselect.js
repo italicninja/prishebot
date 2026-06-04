@@ -6,7 +6,7 @@
 // pills and exposes an "Add" popover with type-to-filter for picking more.
 // Hidden inputs named data-name carry the values to the server on submit.
 //
-// Options come from window.PRISHE_<UPPERCASE_SOURCE> — an array of
+// Options come from window.PRISHE_<UPPERCASE_SOURCE> - an array of
 // {id, name, color?} objects. The dot is rendered only when color is set,
 // so channels (no color) display cleanly without one.
 (function () {
@@ -174,7 +174,7 @@
 
     if (options.length === 0) {
       addBtn.disabled = true;
-      addBtn.title = 'Nothing available — add Prishe to this server first.';
+      addBtn.title = 'Nothing available - add Prishe to this server first.';
     }
 
     render();

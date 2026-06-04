@@ -24,7 +24,7 @@ type Config struct {
 	// StorageDir is the base directory for every runtime data file the bot
 	// writes. Set this to a mounted persistent volume in production so role
 	// allow-lists, birthdays, raids, etc. survive redeploys. Defaults to
-	// /data — matches Railway/Fly conventions; override per-file via the
+	// /data - matches Railway/Fly conventions; override per-file via the
 	// individual *_FILE / *_DIR env vars when you need finer control.
 	StorageDir string
 
@@ -42,7 +42,7 @@ type Config struct {
 
 	// BotDescription is the "About Me" text that appears on the bot's Discord
 	// profile. Applied via the Application API on every start so it stays in
-	// sync with what's deployed — useful for displaying environment hints
+	// sync with what's deployed - useful for displaying environment hints
 	// (e.g. dev vs prod) right on the profile card.
 	BotDescription string
 }
@@ -62,12 +62,12 @@ func Load() *Config {
 
 	// Resolve the storage base. Default /data matches the standard mount
 	// point for a Railway/Fly volume. We create it eagerly so the first
-	// write doesn't trip on a missing directory — a failure here is logged
+	// write doesn't trip on a missing directory - a failure here is logged
 	// but not fatal, because individual *_FILE overrides might point
 	// elsewhere and still work.
 	storageDir := getOrDefault("STORAGE_DIR", "/data")
 	if err := os.MkdirAll(storageDir, 0755); err != nil {
-		log.Printf("warning: could not create storage dir %q: %v — per-file writes may fail unless you override each *_FILE env var", storageDir, err)
+		log.Printf("warning: could not create storage dir %q: %v - per-file writes may fail unless you override each *_FILE env var", storageDir, err)
 	}
 
 	// dataPath returns the explicit env override if set, otherwise a path
@@ -117,7 +117,7 @@ func loadSecretKey() string {
 		log.Fatalf("failed to generate fallback secret key: %v", err)
 	}
 	key := hex.EncodeToString(b)
-	log.Println("WARNING: SECRET_KEY is not set. A random key has been generated — sessions will not survive restarts. Set SECRET_KEY in your environment for production use.")
+	log.Println("WARNING: SECRET_KEY is not set. A random key has been generated - sessions will not survive restarts. Set SECRET_KEY in your environment for production use.")
 	return key
 }
 

@@ -3,7 +3,7 @@
 // The bot's "About Me" description is owned by Bot.applyBotDescription
 // (configured via BOT_DESCRIPTION). This module used to also push stats into
 // the description on load, but that endpoint required an owner token and
-// always failed for bots — the call was removed in favour of the single
+// always failed for bots - the call was removed in favour of the single
 // canonical updater.
 package info
 
@@ -35,7 +35,7 @@ type ModuleListing struct {
 // live bot is fine even when this module is loaded before others.
 type ListModulesFunc func(guildID string) []ModuleListing
 
-// CommandHelp is a single command's metadata as exposed to /help — enough
+// CommandHelp is a single command's metadata as exposed to /help - enough
 // to render signatures and a description, without dragging the full
 // discordgo.ApplicationCommand into the info module's surface.
 type CommandHelp struct {
@@ -81,7 +81,7 @@ func (m *Module) Description() string {
 func (m *Module) Category() bot.Category { return bot.CategoryFunctional }
 
 func (m *Module) Commands() []*discordgo.ApplicationCommand {
-	// help is on every-member access by default — clear the admin-only
+	// help is on every-member access by default - clear the admin-only
 	// default that bot.LoadModule would otherwise stamp onto it.
 	allMembers := int64(discordgo.PermissionViewChannel)
 	return []*discordgo.ApplicationCommand{
@@ -209,7 +209,7 @@ func (m *Module) botInfo(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 // modulesList responds with an embed listing the currently active modules in
 // the guild, plus a footer note for any that are loaded but disabled.
-// The response is ephemeral — this is admin-facing config, not a public reply.
+// The response is ephemeral - this is admin-facing config, not a public reply.
 func (m *Module) modulesList(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if i.GuildID == "" {
 		respondError(s, i, "This command only works in a server.")
@@ -252,7 +252,7 @@ func (m *Module) modulesList(s *discordgo.Session, i *discordgo.InteractionCreat
 		}
 		var lines []string
 		for _, ml := range mods {
-			line := "**" + ml.Name + "** — " + ml.Description
+			line := "**" + ml.Name + "** - " + ml.Description
 			if len(ml.Commands) > 0 {
 				cmds := make([]string, len(ml.Commands))
 				for idx, c := range ml.Commands {
@@ -392,13 +392,13 @@ func (m *Module) helpList(s *discordgo.Session, i *discordgo.InteractionCreate) 
 	}
 
 	embed := &discordgo.MessageEmbed{
-		Title:       "Prishe — Available commands",
+		Title:       "Prishe - Available commands",
 		Description: "Pick a command from the slash menu, or type it directly. Parameters: `<required>` / `[optional]`.",
 		Color:       discordBlurple,
 		Fields:      fields,
 	}
 	if len(fields) == 0 {
-		embed.Description = "_No commands are available right now — every module is disabled in this server._"
+		embed.Description = "_No commands are available right now - every module is disabled in this server._"
 	}
 	if len(disabledModules) > 0 {
 		names := make([]string, 0, len(disabledModules))
@@ -423,7 +423,7 @@ func (m *Module) helpList(s *discordgo.Session, i *discordgo.InteractionCreate) 
 }
 
 // buildSigs flattens a slash command into one signature string per leaf path.
-// Mirrors web/handlers.go's buildSigs — kept duplicated here to keep the info
+// Mirrors web/handlers.go's buildSigs - kept duplicated here to keep the info
 // module standalone from the web package.
 func buildSigs(prefix string, opts []*discordgo.ApplicationCommandOption) []string {
 	if len(opts) > 0 &&

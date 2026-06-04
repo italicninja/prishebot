@@ -37,7 +37,7 @@ func (b *Bot) loadModuleState() {
 }
 
 // saveModuleState writes b.guildSettings to disk. Safe to call without
-// holding b.mu — it takes the read lock internally.
+// holding b.mu - it takes the read lock internally.
 func (b *Bot) saveModuleState() {
 	if b.cfg.ModuleStateFile == "" {
 		return

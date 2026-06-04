@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Prishe — A modular Discord bot</title>
+  <title>Prishe - A modular Discord bot</title>
   {{ template "theme-init" . }}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -34,7 +34,7 @@
     <p class="lp-hero-jp" aria-hidden="true">プリッシュ</p>
     <h1 class="lp-hero-title">Prishe</h1>
     <p class="lp-hero-tag">
-      A modular Discord bot for FFXIV-flavored communities — raid sign-ups, birthdays,
+      A modular Discord bot for FFXIV-flavored communities - raid sign-ups, birthdays,
       announcements, and per-server controls, all configured from your browser.
     </p>
     <div class="lp-hero-ctas">
@@ -61,7 +61,7 @@
         <div class="lp-step-body">
           <h3>Invite Prishe</h3>
           <p>
-            Add her to your server with one click. She joins lightweight — every module
+            Add her to your server with one click. She joins lightweight - every module
             is off-by-default-respecting and toggleable per server, so you only pay the
             cognitive cost of features you actually use.
           </p>
@@ -74,7 +74,7 @@
           <p>
             Log in with Discord. The dashboard lists every server you administer.
             Toggle modules, configure roles, set up the raid calendar, and pick
-            announcement channels — no typed slash commands required.
+            announcement channels - no typed slash commands required.
           </p>
         </div>
       </li>
@@ -89,7 +89,7 @@
     <h2 class="lp-section-title">Type <code>/</code> to discover.</h2>
     <p class="lp-section-lead">
       Every Prishe feature shows up in Discord's slash menu. Hit
-      <code>/help</code> at any time for a personal cheat sheet — only you see the reply,
+      <code>/help</code> at any time for a personal cheat sheet - only you see the reply,
       with every command, its parameters, and a one-line description. Visibility honours
       the role allow-lists you set on the dashboard, so members only see what they can use.
     </p>
@@ -102,7 +102,7 @@
     <p class="lp-eyebrow">Features</p>
     <h2 class="lp-section-title">Everything Prishe knows how to do.</h2>
     <p class="lp-section-lead">
-      Modular by design — each feature is a self-contained module loaded at boot.
+      Modular by design - each feature is a self-contained module loaded at boot.
       Switch any of them off per-server from the dashboard.
     </p>
 
@@ -112,7 +112,7 @@
         <p>
           FF14-style sign-ups with role buttons, job selection, late/bench/tentative
           status tracking, and a configurable composition system. Build custom layouts
-          beyond the canonical 2T/2H/2M/1R/1C — any-DPS slots, any-role slots, even
+          beyond the canonical 2T/2H/2M/1R/1C - any-DPS slots, any-role slots, even
           job-locked spots like "1 Warrior, 2 healers, 4 any DPS".
         </p>
       </article>
@@ -139,7 +139,7 @@
         <h3>Posts &amp; Announcements</h3>
         <p>
           Publish rules, news, or info posts <em>as Prishe</em> via a clean composer
-          modal — short title becomes an embed, no title stays plain text. Edit existing
+          modal - short title becomes an embed, no title stays plain text. Edit existing
           posts in place; the modal pre-fills with the current content.
         </p>
       </article>
@@ -148,8 +148,8 @@
         <h3>Audit Logging</h3>
         <p>
           Server owners can pipe every dashboard change to a channel of their choice.
-          Posts arrive as explicit per-change diffs — exactly which module was toggled,
-          which roles were added or removed, who did it — without spammy generics.
+          Posts arrive as explicit per-change diffs - exactly which module was toggled,
+          which roles were added or removed, who did it - without spammy generics.
         </p>
       </article>
 
@@ -157,7 +157,7 @@
         <h3>Granular Permissions</h3>
         <p>
           Lock each command to specific roles and channels from the dashboard. Visibility
-          in Discord's slash menu syncs automatically — members only see commands they
+          in Discord's slash menu syncs automatically - members only see commands they
           can actually run, and admins always have access.
         </p>
       </article>
@@ -166,7 +166,7 @@
         <h3>Dashboard Moderators</h3>
         <p>
           Admins can promote any role to dashboard-moderator status. Holders can sign
-          in and manage the same configuration without needing Discord-level admin —
+          in and manage the same configuration without needing Discord-level admin -
           owner-only actions (leave server, edit moderator list) stay locked.
         </p>
       </article>
@@ -175,7 +175,7 @@
         <h3>Per-Server Everything</h3>
         <p>
           Module toggles, command perms, channel allow-lists, raid templates, audit
-          channel, birthday settings — all per-server. Configure one server without
+          channel, birthday settings - all per-server. Configure one server without
           touching another. Storage survives restarts on a mounted volume.
         </p>
       </article>
@@ -191,7 +191,7 @@
     <p>
       Prishe is built in Go on top of <a href="https://github.com/bwmarrin/discordgo">discordgo</a>.
       The bot loads each feature as a self-contained module at boot, so adding a new
-      capability never has to touch the existing ones — and disabling any of them is
+      capability never has to touch the existing ones - and disabling any of them is
       a single dashboard toggle.
     </p>
     <p>

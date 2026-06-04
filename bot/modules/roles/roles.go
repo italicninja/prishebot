@@ -171,7 +171,7 @@ func (m *Module) handleList(s *discordgo.Session, i *discordgo.InteractionCreate
 	for _, r := range list {
 		sb.WriteString(fmt.Sprintf("<@&%s>", r.RoleID))
 		if r.Description != "" {
-			sb.WriteString(fmt.Sprintf(" — %s", r.Description))
+			sb.WriteString(fmt.Sprintf(" - %s", r.Description))
 		}
 		sb.WriteByte('\n')
 	}

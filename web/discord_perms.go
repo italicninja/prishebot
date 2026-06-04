@@ -1,6 +1,6 @@
 // Push Discord Application Command Permissions v2 overrides on behalf of the
 // logged-in admin, so the role allow-list the admin set in the dashboard also
-// controls who sees the command in Discord's slash menu — not just whether
+// controls who sees the command in Discord's slash menu - not just whether
 // the bot will accept the invocation at runtime.
 //
 // Why a user token and not the bot token? Discord requires a *user* OAuth2
@@ -49,7 +49,7 @@ type cmdPermBody struct {
 //
 // userToken is the OAuth2 bearer token of the admin saving the form. The
 // session must have been authorized with the
-// "applications.commands.permissions.update" scope — older sessions created
+// "applications.commands.permissions.update" scope - older sessions created
 // before that scope was added will fail with 401 here. We surface that as a
 // distinct error so callers can log a hint without panicking.
 //
@@ -64,7 +64,7 @@ func syncCommandPermissions(ctx context.Context, userToken, appID, guildID, comm
 	}
 
 	body := cmdPermBody{Permissions: make([]cmdPermEntry, 0, len(allowedRoleIDs))}
-	// Deduplicate role IDs while preserving order — Discord rejects duplicates.
+	// Deduplicate role IDs while preserving order - Discord rejects duplicates.
 	seen := make(map[string]struct{}, len(allowedRoleIDs))
 	for _, id := range allowedRoleIDs {
 		if id == "" {
@@ -92,7 +92,7 @@ func syncCommandPermissions(ctx context.Context, userToken, appID, guildID, comm
 	client := &http.Client{Timeout: 10 * time.Second}
 
 	for attempt := 0; attempt <= syncMaxRetries; attempt++ {
-		// Build the request fresh each attempt — the body Reader is consumed on send.
+		// Build the request fresh each attempt - the body Reader is consumed on send.
 		req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(payload))
 		if err != nil {
 			return fmt.Errorf("build request: %w", err)
@@ -124,7 +124,7 @@ func syncCommandPermissions(ctx context.Context, userToken, appID, guildID, comm
 		}
 
 		if resp.StatusCode == http.StatusUnauthorized {
-			return fmt.Errorf("discord 401 — admin's session lacks applications.commands.permissions.update scope (have them log out and back in): %s", respBody)
+			return fmt.Errorf("discord 401 - admin's session lacks applications.commands.permissions.update scope (have them log out and back in): %s", respBody)
 		}
 		return fmt.Errorf("discord %d: %s", resp.StatusCode, respBody)
 	}

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Prishe — Birthday · {{ .Guild.Name }}</title>
+  <title>Prishe - Birthday · {{ .Guild.Name }}</title>
   {{ template "theme-init" . }}
   <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -81,7 +81,7 @@
           Prishe will post birthday messages here. Leave blank to disable announcements.
         </p>
         <select name="channel_id" id="channel_id" class="form-select">
-          <option value="">— disabled —</option>
+          <option value="">- disabled -</option>
           {{ range .Channels }}
           <option value="{{ .ID }}"{{ if eq .ID $.AnnouncementChannelID }} selected{{ end }}>#{{ .Name }}</option>
           {{ end }}
@@ -134,7 +134,7 @@
   <div class="empty" style="padding:2rem 1rem;margin-bottom:1.25rem;">
     <div class="empty-icon">🖼️</div>
     <h2>No GIFs yet</h2>
-    <p>Upload .gif files below — Prishe will pick one at random on each birthday.</p>
+    <p>Upload .gif files below - Prishe will pick one at random on each birthday.</p>
   </div>
   {{ end }}
 
@@ -156,7 +156,7 @@
 </div>
 
 <script>
-// Keep only the checkbox value submitted — the hidden fallback fires when unchecked.
+// Keep only the checkbox value submitted - the hidden fallback fires when unchecked.
 document.querySelectorAll('input[type=checkbox][name=gifs_enabled]').forEach(function(cb) {
   cb.addEventListener('change', function() {
     var hidden = this.form.querySelector('input[type=hidden][name=gifs_enabled]');

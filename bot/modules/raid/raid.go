@@ -139,7 +139,7 @@ var stdTemplate = RaidTemplate{
 	},
 }
 
-// Slot.Role accepts more than just the five canonical role keys — a template
+// Slot.Role accepts more than just the five canonical role keys - a template
 // can also require a specific job (e.g. "warrior") or use the aggregate keys
 // "dps" (any melee/ranged/caster) and "any" (any role). The helpers below
 // classify a Slot.Role string and decide whether it accepts a given signee.
@@ -165,7 +165,7 @@ func validSlotKeys() map[string]struct{} {
 }
 
 // JobInfo is the lightweight projection of jobDef exposed to the web layer
-// (for the template-builder picker). Keys and display names only — no asset
+// (for the template-builder picker). Keys and display names only - no asset
 // URLs, which are an internal concern.
 type JobInfo struct {
 	Key  string `json:"key"`
@@ -342,7 +342,7 @@ func newSlots() []Slot {
 //  3. Any-DPS slots.
 //  4. Any-role slots.
 //
-// Unknown keys in t.Counts are ignored — the template store filters them on
+// Unknown keys in t.Counts are ignored - the template store filters them on
 // save, but be defensive in case of stale JSON on disk.
 func newSlotsFromTemplate(t RaidTemplate) []Slot {
 	slots := make([]Slot, 0)
@@ -373,7 +373,7 @@ func newSlotsFromTemplate(t RaidTemplate) []Slot {
 
 // slotGroupLabel returns the embed-field title for a Slot.Role group, with
 // the appropriate emoji and human-readable label. Falls back to the raw key
-// when nothing matches — keeps stale data from breaking the render.
+// when nothing matches - keeps stale data from breaking the render.
 func (m *Module) slotGroupLabel(slotRole string) string {
 	// Aggregate kinds first.
 	switch slotRole {
@@ -459,7 +459,7 @@ func (m *Module) GuildTemplates(guildID string) []RaidTemplate {
 
 // Template returns the template for a (guild, ID) pair, falling back to the
 // built-in standard comp when the ID is empty, "standard", or unknown.
-// Returning the standard template on miss keeps the create path simple — we
+// Returning the standard template on miss keeps the create path simple - we
 // never have to handle "no template" downstream.
 func (m *Module) Template(guildID, id string) RaidTemplate {
 	if id == "" || id == stdTemplate.ID {
@@ -527,7 +527,7 @@ func (m *Module) AddTemplate(guildID string, t RaidTemplate) error {
 }
 
 // DeleteTemplate removes a custom template. The standard template is
-// rejected — it's a constant, not stored, and "deleting" it makes no sense.
+// rejected - it's a constant, not stored, and "deleting" it makes no sense.
 func (m *Module) DeleteTemplate(guildID, id string) error {
 	if id == stdTemplate.ID {
 		return fmt.Errorf("cannot delete the standard template")
@@ -764,7 +764,7 @@ func (m *Module) sweepStartedRaids(s *discordgo.Session) {
 func (m *Module) ensureEmojis(s *discordgo.Session) {
 	existing, err := s.ApplicationEmojis(m.appID)
 	if err != nil {
-		log.Printf("[raid] could not list application emojis: %v — icons will fall back to text/Unicode", err)
+		log.Printf("[raid] could not list application emojis: %v - icons will fall back to text/Unicode", err)
 		return
 	}
 
@@ -805,7 +805,7 @@ func (m *Module) ensureEmojis(s *discordgo.Session) {
 	}
 	m.roleEmoji = roleEmoji
 
-	// Job icons — emoji name is "prs_<key>" (e.g. "prs_darkknight")
+	// Job icons - emoji name is "prs_<key>" (e.g. "prs_darkknight")
 	jobEmoji := make(map[string]*discordgo.ComponentEmoji, len(allJobs))
 	for _, j := range allJobs {
 		if e := upload("prs_"+j.key, j.iconURL); e != nil {
@@ -929,7 +929,7 @@ func (m *Module) handleList(s *discordgo.Session, i *discordgo.InteractionCreate
 				filled++
 			}
 		}
-		fmt.Fprintf(&sb, "**%s** — %d/8 signed up", r.Title, filled)
+		fmt.Fprintf(&sb, "**%s** - %d/8 signed up", r.Title, filled)
 		if r.UnixTime != 0 {
 			fmt.Fprintf(&sb, "\n📅 <t:%d:D> · 🕐 <t:%d:t> · ⏳ <t:%d:R>", r.UnixTime, r.UnixTime, r.UnixTime)
 		}
@@ -1009,7 +1009,7 @@ func (m *Module) handleJoin(s *discordgo.Session, i *discordgo.InteractionCreate
 		ephemeralRespond(s, i, "You're already registered for this raid. Click **Withdraw** first to change.")
 		return
 	}
-	// A role-button click is available if any empty slot accepts the role —
+	// A role-button click is available if any empty slot accepts the role -
 	// including aggregates (dps/any) and job-specific slots whose owning
 	// role matches.
 	available := 0
@@ -1085,7 +1085,7 @@ func (m *Module) handleJobSelect(s *discordgo.Session, i *discordgo.InteractionC
 	})
 	msg := fmt.Sprintf("✅ Signed up as **%s**!", jobLabel)
 	if closed {
-		msg += "\n🔒 The raid is now full — sign-ups are closed."
+		msg += "\n🔒 The raid is now full - sign-ups are closed."
 	}
 	updateEphemeral(s, i, msg)
 }
@@ -1162,7 +1162,7 @@ func (m *Module) handleBench(s *discordgo.Session, i *discordgo.InteractionCreat
 		ephemeralRespond(s, i, "Sign-ups for this raid are closed.")
 		return
 	}
-	// Already on bench — nothing to do.
+	// Already on bench - nothing to do.
 	if se := raid.findStatusEntry(user.ID); se != nil {
 		if se.Type == "bench" {
 			m.mu.Unlock()
@@ -1174,7 +1174,7 @@ func (m *Module) handleBench(s *discordgo.Session, i *discordgo.InteractionCreat
 		return
 	}
 
-	// Already in main roster — move to bench, keep job.
+	// Already in main roster - move to bench, keep job.
 	if signee := raid.popMainSlot(user.ID); signee != nil {
 		raid.StatusEntries = append(raid.StatusEntries, StatusEntry{
 			UserID: signee.UserID, DisplayName: signee.DisplayName,
@@ -1193,7 +1193,7 @@ func (m *Module) handleBench(s *discordgo.Session, i *discordgo.InteractionCreat
 		return
 	}
 
-	// Not registered — show job picker.
+	// Not registered - show job picker.
 	m.mu.Unlock()
 	m.showJobSelect(s, i, "raid:selectbench:"+raidID, "Choose your job for **Bench**:", allJobs)
 }
@@ -1304,7 +1304,7 @@ func (m *Module) handleTentative(s *discordgo.Session, i *discordgo.InteractionC
 		ephemeralRespond(s, i, "Sign-ups for this raid are closed.")
 		return
 	}
-	// Already tentative — nothing to do.
+	// Already tentative - nothing to do.
 	if se := raid.findStatusEntry(user.ID); se != nil {
 		if se.Type == "tentative" {
 			m.mu.Unlock()
@@ -1316,7 +1316,7 @@ func (m *Module) handleTentative(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 
-	// Already in main roster — move to tentative, keep job.
+	// Already in main roster - move to tentative, keep job.
 	if signee := raid.popMainSlot(user.ID); signee != nil {
 		raid.StatusEntries = append(raid.StatusEntries, StatusEntry{
 			UserID: signee.UserID, DisplayName: signee.DisplayName,
@@ -1335,7 +1335,7 @@ func (m *Module) handleTentative(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 
-	// Not registered — show job picker.
+	// Not registered - show job picker.
 	m.mu.Unlock()
 	m.showJobSelect(s, i, "raid:selecttent:"+raidID, "Choose your job for **Tentative**:", allJobs)
 }
@@ -1419,14 +1419,14 @@ func (m *Module) handleAbsence(s *discordgo.Session, i *discordgo.InteractionCre
 		return
 	}
 
-	// Already in a different status — block.
+	// Already in a different status - block.
 	if se := raid.findStatusEntry(user.ID); se != nil {
 		m.mu.Unlock()
 		ephemeralRespond(s, i, fmt.Sprintf("You're already marked as **%s**. Click **Withdraw** first to change.", se.Type))
 		return
 	}
 
-	// Already in main roster — move to absence, keep job.
+	// Already in main roster - move to absence, keep job.
 	if signee := raid.popMainSlot(user.ID); signee != nil {
 		raid.StatusEntries = append(raid.StatusEntries, StatusEntry{
 			UserID: signee.UserID, DisplayName: signee.DisplayName,
@@ -1445,7 +1445,7 @@ func (m *Module) handleAbsence(s *discordgo.Session, i *discordgo.InteractionCre
 		return
 	}
 
-	// Not registered at all — add to absence.
+	// Not registered at all - add to absence.
 	raid.StatusEntries = append(raid.StatusEntries, StatusEntry{
 		UserID: user.ID, DisplayName: displayName(user),
 		Type: "absence", Number: raid.nextNum(),
@@ -1501,7 +1501,7 @@ func (m *Module) buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 					if e := m.jobEmoji[sl.Signee.Job]; e != nil {
 						line += fmt.Sprintf(" <:%s:%s>", e.Name, e.ID)
 					} else {
-						line += " — " + resolveJobName(sl.Signee.Job)
+						line += " - " + resolveJobName(sl.Signee.Job)
 					}
 				}
 				if sl.Signee.Late {
@@ -1536,7 +1536,7 @@ func (m *Module) buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 				if e := m.jobEmoji[se.Job]; e != nil {
 					line += fmt.Sprintf(" <:%s:%s>", e.Name, e.ID)
 				} else {
-					line += " — " + resolveJobName(se.Job)
+					line += " - " + resolveJobName(se.Job)
 				}
 			}
 			lines = append(lines, line)
@@ -1569,7 +1569,7 @@ func (m *Module) buildEmbed(raid *Raid) *discordgo.MessageEmbed {
 	}
 	if !raid.Closed {
 		// Pick the first role (in stdComp order) that still has an empty slot
-		// somewhere — could be a role-specific, job-specific (under that role),
+		// somewhere - could be a role-specific, job-specific (under that role),
 		// dps, or any-role slot. The thumbnail nudges the next likely sign-up.
 		for _, def := range stdComp {
 			for _, sl := range raid.Slots {
@@ -1846,7 +1846,7 @@ func (m *Module) GuildRaids(guildID string) []RaidView {
 // CloseRaid closes sign-ups for a raid by ID. Returns false if not found or
 // already closed. When s is non-nil, the Discord message is also edited to
 // the closed embed + closed-state components so the channel reflects the
-// new state — matches what /raid close does on the bot side.
+// new state - matches what /raid close does on the bot side.
 func (m *Module) CloseRaid(s *discordgo.Session, guildID, raidID string) bool {
 	m.mu.Lock()
 	r, ok := m.raids[raidID]
@@ -1910,7 +1910,7 @@ func buildRaidView(r *Raid) RaidView {
 // This is the web-dashboard equivalent of the /raid create slash command.
 //
 // pingRoleIDs are the roles to mention when posting. The creator picks them
-// per-raid in the dashboard — typically pre-filled with the guild's default
+// per-raid in the dashboard - typically pre-filled with the guild's default
 // ping role (see SetPingRoleID) but freely editable. Empty slice = no ping.
 // AllowedMentions.Roles is scoped to the exact list so only the intended
 // roles get notified, even if Discord's defaults would normally fire every
@@ -1933,7 +1933,7 @@ func (m *Module) CreateRaidFromWeb(s *discordgo.Session, guildID, channelID, tit
 		Components: m.buildComponents(r),
 	}
 	if len(pingRoleIDs) > 0 {
-		// Dedupe while preserving the creator's order — Discord ignores
+		// Dedupe while preserving the creator's order - Discord ignores
 		// duplicate IDs in allowed_mentions, but dedup keeps the content
 		// readable when the same role appeared in the form twice.
 		seen := make(map[string]struct{}, len(pingRoleIDs))

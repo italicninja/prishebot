@@ -31,7 +31,7 @@ type CommandPermissions struct {
 }
 
 // NewCommandPermissions constructs the store and loads any persisted state.
-// A read error other than "file not found" is logged but not fatal — we'd
+// A read error other than "file not found" is logged but not fatal - we'd
 // rather start with an empty (admin-only) state than refuse to boot.
 func NewCommandPermissions(file string) *CommandPermissions {
 	cp := &CommandPermissions{file: file, roles: make(map[string]map[string][]string)}
@@ -40,7 +40,7 @@ func NewCommandPermissions(file string) *CommandPermissions {
 }
 
 // Allowed reports whether a guild member may invoke a command.
-// Members with Administrator or Manage Server permission always pass — this
+// Members with Administrator or Manage Server permission always pass - this
 // guarantees an admin can never accidentally lock themselves out.
 func (cp *CommandPermissions) Allowed(guildID, cmdName string, member *discordgo.Member) bool {
 	if member == nil {

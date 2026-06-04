@@ -1,11 +1,11 @@
 // Per-guild channel allow-lists for slash commands.
 //
 // Two layers compose with AND:
-//   - Global    — a guild-wide allow-list. Empty = every channel is allowed.
-//   - Per-module — narrows the global gate for one module. Empty = inherits the global gate.
+//   - Global    - a guild-wide allow-list. Empty = every channel is allowed.
+//   - Per-module - narrows the global gate for one module. Empty = inherits the global gate.
 //
 // A command is permitted in a channel only if both gates allow it. Default
-// (no entries at either level) is "all channels" — admins opt in to restrict.
+// (no entries at either level) is "all channels" - admins opt in to restrict.
 package bot
 
 import (

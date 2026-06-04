@@ -1,4 +1,4 @@
-// Per-guild audit-log channel — set by the server owner from the dashboard
+// Per-guild audit-log channel - set by the server owner from the dashboard
 // to receive notifications when anyone makes a configuration change via the
 // web UI. Empty / missing means "auditing disabled" for that guild.
 package bot

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Prishe — Raid templates · {{ .Guild.Name }}</title>
+  <title>Prishe - Raid templates · {{ .Guild.Name }}</title>
   {{ template "theme-init" . }}
   <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -52,7 +52,7 @@
       {{ if ne .ID "standard" }}
       <div class="raid-card-foot">
         <form method="POST" action="/dashboard/server/{{ $.Guild.ID }}/raids/templates/{{ .ID }}/delete"
-              onsubmit="return confirm('Delete the {{ .Name }} template? Existing raids that used it keep their slots — only future creations are affected.')">
+              onsubmit="return confirm('Delete the {{ .Name }} template? Existing raids that used it keep their slots - only future creations are affected.')">
           <button type="submit" class="btn btn-ghost btn-sm">Delete</button>
         </form>
       </div>
