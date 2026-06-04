@@ -968,3 +968,297 @@ code {
   font-size: 0.78rem;
   color: var(--muted);
 }
+
+/* ── Landing page v2 (seraymeric.com-flavoured) ───────────────────────────── */
+/* Self-contained block: every selector is .lp-* (landing page). The body
+   uses Inter and a hand-tuned palette so the page reads as a polished
+   marketing surface even though the dashboard underneath stays GitHub-y. */
+
+.lp-body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(99,102,241,0.18), transparent 60%),
+    radial-gradient(800px 500px at 80% 30%, rgba(167,139,250,0.12), transparent 60%),
+    var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  font-size: 15px;
+}
+
+/* Top nav -- horizontal utility bar, transparent over the gradient. */
+.lp-nav {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  padding: 1.25rem 2rem;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+.lp-brand {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-weight: 700;
+  font-size: 1.6rem;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+.lp-brand:hover { text-decoration: none; }
+.lp-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-left: auto;
+}
+.lp-nav-links a {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.lp-nav-links a:hover { color: var(--text); text-decoration: none; }
+.lp-nav-login {
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  color: var(--text) !important;
+}
+.lp-nav-login:hover { border-color: var(--accent); }
+.lp-theme-btn { border: 1px solid var(--border); }
+
+/* Hero. Large, centered, with a Japanese subtitle echoing the seraymeric vibe. */
+.lp-hero {
+  padding: 5rem 1.5rem 7rem;
+  text-align: center;
+}
+.lp-hero-inner {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+}
+.lp-hero-jp {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  margin-bottom: 0.25rem;
+}
+.lp-hero-title {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-weight: 700;
+  font-size: clamp(3.5rem, 9vw, 6rem);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  background: linear-gradient(180deg, var(--text) 0%, color-mix(in srgb, var(--text) 70%, var(--accent)) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.lp-hero-tag {
+  font-size: 1.05rem;
+  line-height: 1.65;
+  color: var(--muted);
+  max-width: 540px;
+}
+.lp-hero-ctas {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.lp-cta-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--accent);
+  color: #fff !important;
+  padding: 0.85rem 1.5rem;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: transform 0.12s, box-shadow 0.12s, background 0.12s;
+  box-shadow: 0 8px 30px -8px rgba(99,102,241,0.6);
+}
+.lp-cta-primary:hover {
+  text-decoration: none;
+  background: color-mix(in srgb, var(--accent) 88%, white);
+  transform: translateY(-1px);
+}
+.lp-cta-secondary {
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  border-bottom: 1px solid transparent;
+  padding-bottom: 2px;
+  transition: border-color 0.12s, color 0.12s;
+}
+.lp-cta-secondary:hover { border-color: var(--accent); text-decoration: none; }
+
+/* Sections — generous vertical rhythm, optional alt background. */
+.lp-section {
+  padding: 5rem 1.5rem;
+}
+.lp-section-alt {
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.lp-section-inner {
+  max-width: 880px;
+  margin: 0 auto;
+}
+.lp-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 0.75rem;
+}
+.lp-section-title {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin-bottom: 1rem;
+  color: var(--text);
+}
+.lp-section-lead {
+  font-size: 1.05rem;
+  color: var(--muted);
+  max-width: 640px;
+  margin-bottom: 2.5rem;
+}
+.lp-section code {
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  border: 1px solid var(--border);
+  padding: 0.1em 0.45em;
+  border-radius: 4px;
+}
+
+/* Setup steps. Big number on the left, prose on the right. */
+.lp-steps {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin: 2rem 0 0;
+  counter-reset: none; /* numbers are explicit in the markup */
+  padding: 0;
+}
+.lp-step {
+  display: flex;
+  gap: 1.25rem;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 50%, transparent);
+}
+.lp-step-num {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+  flex-shrink: 0;
+  min-width: 2rem;
+}
+.lp-step-body h3 {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+.lp-step-body p {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+/* Features list — text-heavy, no card grid. */
+.lp-features-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem 2.5rem;
+  margin-top: 1rem;
+}
+.lp-feature h3 {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+  color: var(--text);
+}
+.lp-feature p {
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+.lp-feature code {
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  border: 1px solid var(--border);
+  padding: 0.1em 0.45em;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+/* Developer note — looser, narrative typography. */
+.lp-about p {
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.75;
+  margin-bottom: 1.1rem;
+  max-width: 680px;
+}
+.lp-about a {
+  color: var(--accent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.lp-about a:hover { border-bottom-color: var(--accent); text-decoration: none; }
+
+/* Footer. */
+.lp-footer {
+  border-top: 1px solid var(--border);
+  padding: 2rem 1.5rem;
+  margin-top: 2rem;
+}
+.lp-footer-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+.lp-footer-brand strong {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-weight: 700;
+  font-size: 1.2rem;
+  letter-spacing: 0.01em;
+}
+.lp-footer-sub {
+  margin-left: 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.lp-footer-links {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+.lp-footer-links a {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.lp-footer-links a:hover { color: var(--text); text-decoration: none; }
+
+/* Mobile: collapse the nav links into a wrap, scale hero down. */
+@media (max-width: 640px) {
+  .lp-nav { padding: 1rem 1.25rem; gap: 1rem; flex-wrap: wrap; }
+  .lp-nav-links { gap: 1rem; }
+  .lp-hero { padding: 3rem 1rem 4rem; }
+  .lp-section { padding: 3.5rem 1.25rem; }
+}

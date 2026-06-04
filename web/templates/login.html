@@ -3,57 +3,225 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Prishe</title>
+  <title>Prishe — A modular Discord bot</title>
   {{ template "theme-init" . }}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
-<div class="landing">
+<body class="lp-body">
 
-  <nav class="landing-nav">
-    <span class="landing-nav-brand">Prishe</span>
-    <button class="theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">
-      <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-      <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-    </button>
+<!-- ── Top nav ────────────────────────────────────────────────────────────── -->
+<header class="lp-nav">
+  <a href="/" class="lp-brand">Prishe</a>
+  <nav class="lp-nav-links" aria-label="Primary">
+    <a href="#setup">Setup</a>
+    <a href="#features">Features</a>
+    <a href="#commands">Commands</a>
+    <a href="#about">About</a>
+    <a href="/login" class="lp-nav-login">Login</a>
   </nav>
+  <button class="theme-btn lp-theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">
+    <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  </button>
+</header>
 
-  <section class="hero">
-    <div class="hero-label">Discord Bot</div>
-    <h1 class="hero-title">Meet <span class="accent">Prishe</span></h1>
-    <p class="hero-sub">A modular Discord bot — toggle features per server, manage raids, and more, all from your browser.</p>
-    <a href="/login" class="btn btn-discord">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-        <path d="M20.317 4.492c-1.53-.69-3.17-1.2-4.885-1.49a.075.075 0 0 0-.079.036c-.21.369-.444.85-.608 1.23a18.566 18.566 0 0 0-5.487 0 12.36 12.36 0 0 0-.617-1.23A.077.077 0 0 0 8.562 3c-1.714.29-3.354.8-4.885 1.491a.07.07 0 0 0-.032.027C.533 9.093-.32 13.555.099 17.961a.08.08 0 0 0 .031.055 20.03 20.03 0 0 0 5.993 2.98.078.078 0 0 0 .084-.026c.462-.62.874-1.275 1.226-1.963.021-.04.001-.088-.041-.104a13.201 13.201 0 0 1-1.872-.878.075.075 0 0 1-.008-.125c.126-.093.252-.19.372-.287a.075.075 0 0 1 .078-.01c3.927 1.764 8.18 1.764 12.061 0a.075.075 0 0 1 .079.009c.12.098.245.195.372.288a.075.075 0 0 1-.006.125c-.598.344-1.22.635-1.873.877a.075.075 0 0 0-.041.105c.36.687.772 1.341 1.225 1.962a.077.077 0 0 0 .084.028 19.963 19.963 0 0 0 6.002-2.981.076.076 0 0 0 .032-.054c.5-5.094-.838-9.52-3.549-13.442a.06.06 0 0 0-.031-.028zM8.02 15.278c-1.182 0-2.157-1.069-2.157-2.38 0-1.312.956-2.38 2.157-2.38 1.21 0 2.176 1.077 2.157 2.38 0 1.312-.956 2.38-2.157 2.38zm7.975 0c-1.183 0-2.157-1.069-2.157-2.38 0-1.312.955-2.38 2.157-2.38 1.21 0 2.176 1.077 2.157 2.38 0 1.312-.946 2.38-2.157 2.38z"/>
-      </svg>
-      Sign in with Discord
-    </a>
-  </section>
-
-  <section class="features">
-    <div class="features-grid">
-      <div class="feat-card">
-        <h3>Raid Sign-Ups</h3>
-        <p>FF14-style raid sign-ups with role buttons, job selection, and status tracking — managed right from Discord.</p>
-      </div>
-      <div class="feat-card">
-        <h3>Self-Assignable Roles</h3>
-        <p>Let members pick up roles themselves with <code>/role join</code>. Configure which roles are available per server.</p>
-      </div>
-      <div class="feat-card">
-        <h3>Birthday Wishes</h3>
-        <p>Prishe remembers birthdays and posts a personalised message with a GIF on the big day.</p>
-      </div>
-      <div class="feat-card">
-        <h3>Per-Server Controls</h3>
-        <p>Enable or disable any module per server from the dashboard — no commands needed.</p>
-      </div>
+<!-- ── Hero ───────────────────────────────────────────────────────────────── -->
+<section class="lp-hero">
+  <div class="lp-hero-inner">
+    <p class="lp-hero-jp" aria-hidden="true">プリッシュ</p>
+    <h1 class="lp-hero-title">Prishe</h1>
+    <p class="lp-hero-tag">
+      A modular Discord bot for FFXIV-flavored communities — raid sign-ups, birthdays,
+      announcements, and per-server controls, all configured from your browser.
+    </p>
+    <div class="lp-hero-ctas">
+      <a href="/login" class="lp-cta-primary">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M20.317 4.492c-1.53-.69-3.17-1.2-4.885-1.49a.075.075 0 0 0-.079.036c-.21.369-.444.85-.608 1.23a18.566 18.566 0 0 0-5.487 0 12.36 12.36 0 0 0-.617-1.23A.077.077 0 0 0 8.562 3c-1.714.29-3.354.8-4.885 1.491a.07.07 0 0 0-.032.027C.533 9.093-.32 13.555.099 17.961a.08.08 0 0 0 .031.055 20.03 20.03 0 0 0 5.993 2.98.078.078 0 0 0 .084-.026c.462-.62.874-1.275 1.226-1.963.021-.04.001-.088-.041-.104a13.201 13.201 0 0 1-1.872-.878.075.075 0 0 1-.008-.125c.126-.093.252-.19.372-.287a.075.075 0 0 1 .078-.01c3.927 1.764 8.18 1.764 12.061 0a.075.075 0 0 1 .079.009c.12.098.245.195.372.288a.075.075 0 0 1-.006.125c-.598.344-1.22.635-1.873.877a.075.075 0 0 0-.041.105c.36.687.772 1.341 1.225 1.962a.077.077 0 0 0 .084.028 19.963 19.963 0 0 0 6.002-2.981.076.076 0 0 0 .032-.054c.5-5.094-.838-9.52-3.549-13.442a.06.06 0 0 0-.031-.028zM8.02 15.278c-1.182 0-2.157-1.069-2.157-2.38 0-1.312.956-2.38 2.157-2.38 1.21 0 2.176 1.077 2.157 2.38 0 1.312-.956 2.38-2.157 2.38zm7.975 0c-1.183 0-2.157-1.069-2.157-2.38 0-1.312.955-2.38 2.157-2.38 1.21 0 2.176 1.077 2.157 2.38 0 1.312-.946 2.38-2.157 2.38z"/>
+        </svg>
+        Invite &amp; Configure
+      </a>
+      <a href="#features" class="lp-cta-secondary">Explore features →</a>
     </div>
-  </section>
+  </div>
+</section>
 
-  <footer class="landing-footer">Prishe &mdash; Built with Go &amp; discordgo</footer>
+<!-- ── Two-step setup ─────────────────────────────────────────────────────── -->
+<section class="lp-section" id="setup">
+  <div class="lp-section-inner">
+    <p class="lp-eyebrow">Setup</p>
+    <h2 class="lp-section-title">Two steps and you're live.</h2>
 
-</div>
+    <ol class="lp-steps">
+      <li class="lp-step">
+        <span class="lp-step-num">1</span>
+        <div class="lp-step-body">
+          <h3>Invite Prishe</h3>
+          <p>
+            Add her to your server with one click. She joins lightweight — every module
+            is off-by-default-respecting and toggleable per server, so you only pay the
+            cognitive cost of features you actually use.
+          </p>
+        </div>
+      </li>
+      <li class="lp-step">
+        <span class="lp-step-num">2</span>
+        <div class="lp-step-body">
+          <h3>Sign in &amp; customise</h3>
+          <p>
+            Log in with Discord. The dashboard lists every server you administer.
+            Toggle modules, configure roles, set up the raid calendar, and pick
+            announcement channels — no typed slash commands required.
+          </p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ── Slash commands ─────────────────────────────────────────────────────── -->
+<section class="lp-section lp-section-alt" id="commands">
+  <div class="lp-section-inner">
+    <p class="lp-eyebrow">Slash commands</p>
+    <h2 class="lp-section-title">Type <code>/</code> to discover.</h2>
+    <p class="lp-section-lead">
+      Every Prishe feature shows up in Discord's slash menu. Hit
+      <code>/help</code> at any time for a personal cheat sheet — only you see the reply,
+      with every command, its parameters, and a one-line description. Visibility honours
+      the role allow-lists you set on the dashboard, so members only see what they can use.
+    </p>
+  </div>
+</section>
+
+<!-- ── Features ───────────────────────────────────────────────────────────── -->
+<section class="lp-section" id="features">
+  <div class="lp-section-inner">
+    <p class="lp-eyebrow">Features</p>
+    <h2 class="lp-section-title">Everything Prishe knows how to do.</h2>
+    <p class="lp-section-lead">
+      Modular by design — each feature is a self-contained module loaded at boot.
+      Switch any of them off per-server from the dashboard.
+    </p>
+
+    <div class="lp-features-list">
+      <article class="lp-feature">
+        <h3>Raid Sign-Ups</h3>
+        <p>
+          FF14-style sign-ups with role buttons, job selection, late/bench/tentative
+          status tracking, and a configurable composition system. Build custom layouts
+          beyond the canonical 2T/2H/2M/1R/1C — any-DPS slots, any-role slots, even
+          job-locked spots like "1 Warrior, 2 healers, 4 any DPS".
+        </p>
+      </article>
+
+      <article class="lp-feature">
+        <h3>Self-Assignable Roles</h3>
+        <p>
+          Curate which roles members can pick up with <code>/role join</code>. Each
+          role can carry a description and a join message; create new Discord roles
+          on the fly or wire up existing ones.
+        </p>
+      </article>
+
+      <article class="lp-feature">
+        <h3>Birthdays</h3>
+        <p>
+          Members save their birthday with <code>/birthday set</code>. Prishe posts a
+          personalised wish on the day, optionally with a random GIF from a per-server
+          library you manage from the dashboard.
+        </p>
+      </article>
+
+      <article class="lp-feature">
+        <h3>Posts &amp; Announcements</h3>
+        <p>
+          Publish rules, news, or info posts <em>as Prishe</em> via a clean composer
+          modal — short title becomes an embed, no title stays plain text. Edit existing
+          posts in place; the modal pre-fills with the current content.
+        </p>
+      </article>
+
+      <article class="lp-feature">
+        <h3>Audit Logging</h3>
+        <p>
+          Server owners can pipe every dashboard change to a channel of their choice.
+          Posts arrive as explicit per-change diffs — exactly which module was toggled,
+          which roles were added or removed, who did it — without spammy generics.
+        </p>
+      </article>
+
+      <article class="lp-feature">
+        <h3>Granular Permissions</h3>
+        <p>
+          Lock each command to specific roles and channels from the dashboard. Visibility
+          in Discord's slash menu syncs automatically — members only see commands they
+          can actually run, and admins always have access.
+        </p>
+      </article>
+
+      <article class="lp-feature">
+        <h3>Dashboard Moderators</h3>
+        <p>
+          Admins can promote any role to dashboard-moderator status. Holders can sign
+          in and manage the same configuration without needing Discord-level admin —
+          owner-only actions (leave server, edit moderator list) stay locked.
+        </p>
+      </article>
+
+      <article class="lp-feature">
+        <h3>Per-Server Everything</h3>
+        <p>
+          Module toggles, command perms, channel allow-lists, raid templates, audit
+          channel, birthday settings — all per-server. Configure one server without
+          touching another. Storage survives restarts on a mounted volume.
+        </p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ── Developer note ─────────────────────────────────────────────────────── -->
+<section class="lp-section lp-section-alt" id="about">
+  <div class="lp-section-inner lp-about">
+    <p class="lp-eyebrow">A note from the developer</p>
+    <h2 class="lp-section-title">Why this exists.</h2>
+    <p>
+      Prishe is built in Go on top of <a href="https://github.com/bwmarrin/discordgo">discordgo</a>.
+      The bot loads each feature as a self-contained module at boot, so adding a new
+      capability never has to touch the existing ones — and disabling any of them is
+      a single dashboard toggle.
+    </p>
+    <p>
+      The dashboard is the source of truth. Anything you can do via slash commands you
+      can configure visually, and the bot enforces the same role allow-lists at runtime
+      that the dashboard surfaces. No shadow state, no "you have to type it just so."
+    </p>
+    <p>
+      She's currently in active development. Bear with her :3
+    </p>
+  </div>
+</section>
+
+<!-- ── Footer ─────────────────────────────────────────────────────────────── -->
+<footer class="lp-footer">
+  <div class="lp-footer-inner">
+    <div class="lp-footer-brand">
+      <strong>Prishe</strong>
+      <span class="lp-footer-sub">Built with Go &amp; discordgo</span>
+    </div>
+    <nav class="lp-footer-links" aria-label="Footer">
+      <a href="#setup">Setup</a>
+      <a href="#features">Features</a>
+      <a href="#commands">Commands</a>
+      <a href="#about">About</a>
+      <a href="/login">Login</a>
+    </nav>
+  </div>
+</footer>
+
 {{ template "theme-js" . }}
 </body>
 </html>
