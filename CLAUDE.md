@@ -86,6 +86,10 @@ Copy `.env.example` to `.env`. Required vars:
 
 Key optional vars: `PORT` (default 8080), `STORAGE_DIR` (default `/data`), `SECURE_COOKIES` (set `true` in prod), `ICONS_DIR` + `BASE_URL` (FF14 job icons), `BOT_DESCRIPTION` (synced to Discord profile on start).
 
+## Workflow
+
+After every commit and push, run `railway logs` from the project root and check for errors before reporting the task complete.
+
 ## Key Files
 
 - [main.go](main.go) — entry point, module registration order
