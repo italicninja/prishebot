@@ -1,6 +1,6 @@
 [build]
 builder = "DOCKERFILE"
-watchPatterns = ["**/*.go", "Dockerfile", "go.mod", "go.sum", "web/static/**", "web/templates/**"]
+watchPatterns = ["**/*.go", "Dockerfile", "go.mod", "go.sum", "web/static/**", "web/templates/**", "railway.toml"]
 
 [deploy]
 startCommand = "./prishe"
