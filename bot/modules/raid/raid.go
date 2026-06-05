@@ -61,15 +61,15 @@ var jobsByRole = map[string][]jobDef{
 		{"whitemage",   "White Mage",  "https://xivapi.com/cj/1/whitemage.png"},
 		{"scholar",     "Scholar",     "https://xivapi.com/cj/1/scholar.png"},
 		{"astrologian", "Astrologian", "https://xivapi.com/cj/1/astrologian.png"},
-		{"sage",        "Sage",        "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062122_hr1.tex&format=png"},
+		{"sage",        "Sage",        "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062140_hr1.tex&format=png"},
 	},
 	"melee": {
 		{"monk",    "Monk",    "https://xivapi.com/cj/1/monk.png"},
 		{"dragoon", "Dragoon", "https://xivapi.com/cj/1/dragoon.png"},
 		{"ninja",   "Ninja",   "https://xivapi.com/cj/1/ninja.png"},
 		{"samurai", "Samurai", "https://xivapi.com/cj/1/samurai.png"},
-		{"reaper",  "Reaper",  "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062121_hr1.tex&format=png"},
-		{"viper",   "Viper",   "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062123_hr1.tex&format=png"},
+		{"reaper",  "Reaper",  "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062139_hr1.tex&format=png"},
+		{"viper",   "Viper",   "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062141_hr1.tex&format=png"},
 	},
 	"ranged": {
 		{"bard",      "Bard",      "https://xivapi.com/cj/1/bard.png"},
@@ -80,7 +80,7 @@ var jobsByRole = map[string][]jobDef{
 		{"blackmage",   "Black Mage",  "https://xivapi.com/cj/1/blackmage.png"},
 		{"summoner",    "Summoner",    "https://xivapi.com/cj/1/summoner.png"},
 		{"redmage",     "Red Mage",    "https://xivapi.com/cj/1/redmage.png"},
-		{"pictomancer", "Pictomancer", "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062124_hr1.tex&format=png"},
+		{"pictomancer", "Pictomancer", "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062142_hr1.tex&format=png"},
 	},
 }
 
@@ -774,20 +774,24 @@ func (m *Module) ensureEmojis(s *discordgo.Session) {
 	}
 
 	upload := func(name, iconURL string) *discordgo.ComponentEmoji {
-		if e, ok := byName[name]; ok {
-			log.Printf("[raid] reusing emoji %s (%s)", name, e.ID)
-			return &discordgo.ComponentEmoji{ID: e.ID, Name: e.Name}
-		}
 		img, err := fetchImage(iconURL)
 		if err != nil {
 			log.Printf("[raid] skip emoji %s: %v", name, err)
 			return nil
 		}
 		b64 := base64.StdEncoding.EncodeToString(img)
-		created, err := s.ApplicationEmojiCreate(m.appID, &discordgo.EmojiParams{
-			Name:  name,
-			Image: "data:image/png;base64," + b64,
-		})
+		params := &discordgo.EmojiParams{Name: name, Image: "data:image/png;base64," + b64}
+
+		if e, ok := byName[name]; ok {
+			updated, err := s.ApplicationEmojiEdit(m.appID, e.ID, params)
+			if err != nil {
+				log.Printf("[raid] could not update emoji %s: %v", name, err)
+				return &discordgo.ComponentEmoji{ID: e.ID, Name: e.Name}
+			}
+			log.Printf("[raid] updated emoji %s (%s)", name, updated.ID)
+			return &discordgo.ComponentEmoji{ID: updated.ID, Name: updated.Name}
+		}
+		created, err := s.ApplicationEmojiCreate(m.appID, params)
 		if err != nil {
 			log.Printf("[raid] could not create emoji %s: %v", name, err)
 			return nil
