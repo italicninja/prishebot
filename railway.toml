@@ -1,8 +1,12 @@
 [build]
-dockerfile = "Dockerfile"
+builder = "DOCKERFILE"
+watchPatterns = ["**/*.go", "Dockerfile", "go.mod", "go.sum", "web/static/**", "web/templates/**"]
 
 [deploy]
+startCommand = "./prishe"
 healthcheckPath = "/health"
 healthcheckTimeout = 30
-restartPolicyType = "on_failure"
+restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
+drainingSeconds = "15"
+overlapSeconds = "10"
