@@ -62,19 +62,15 @@ var icons = []icon{
 	{name: "job-whitemage.png", path: "/cj/1/whitemage.png"},
 	{name: "job-scholar.png", path: "/cj/1/scholar.png"},
 	{name: "job-astrologian.png", path: "/cj/1/astrologian.png"},
-	// Endwalker healer - xivapi CDN may return 404; source manually from
-	// https://xivapi.com/cj/1/sage.png if it becomes available.
-	{name: "job-sage.png", path: "/cj/1/sage.png", note: "Endwalker job - may be absent from CDN"},
+	{name: "job-sage.png", path: "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062122_hr1.tex&format=png"},
 
 	// ── Melee DPS jobs ───────────────────────────────────────────────────────────
 	{name: "job-monk.png", path: "/cj/1/monk.png"},
 	{name: "job-dragoon.png", path: "/cj/1/dragoon.png"},
 	{name: "job-ninja.png", path: "/cj/1/ninja.png"},
 	{name: "job-samurai.png", path: "/cj/1/samurai.png"},
-	// Endwalker melee - same caveat as Sage.
-	{name: "job-reaper.png", path: "/cj/1/reaper.png", note: "Endwalker job - may be absent from CDN"},
-	// Dawntrail melee - likely absent until xivapi updates its CDN.
-	{name: "job-viper.png", path: "/cj/1/viper.png", note: "Dawntrail job - absent from CDN; download manually"},
+	{name: "job-reaper.png", path: "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062121_hr1.tex&format=png"},
+	{name: "job-viper.png", path: "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062123_hr1.tex&format=png"},
 
 	// ── Ranged DPS jobs ──────────────────────────────────────────────────────────
 	{name: "job-bard.png", path: "/cj/1/bard.png"},
@@ -85,8 +81,7 @@ var icons = []icon{
 	{name: "job-blackmage.png", path: "/cj/1/blackmage.png"},
 	{name: "job-summoner.png", path: "/cj/1/summoner.png"},
 	{name: "job-redmage.png", path: "/cj/1/redmage.png"},
-	// Dawntrail caster - absent from CDN; download manually once xivapi updates.
-	{name: "job-pictomancer.png", path: "/cj/1/pictomancer.png", note: "Dawntrail job - absent from CDN; download manually"},
+	{name: "job-pictomancer.png", path: "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062124_hr1.tex&format=png"},
 }
 
 func main() {
@@ -129,7 +124,10 @@ func main() {
 				return
 			}
 
-			url := baseURL + ic.path
+			url := ic.path
+			if len(url) == 0 || url[0] == '/' {
+				url = baseURL + ic.path
+			}
 			resp, err := client.Get(url)
 			if err != nil {
 				warn(&mu, &bad, ic, fmt.Sprintf("request failed: %v", err))

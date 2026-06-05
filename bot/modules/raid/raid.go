@@ -61,15 +61,15 @@ var jobsByRole = map[string][]jobDef{
 		{"whitemage",   "White Mage",  "https://xivapi.com/cj/1/whitemage.png"},
 		{"scholar",     "Scholar",     "https://xivapi.com/cj/1/scholar.png"},
 		{"astrologian", "Astrologian", "https://xivapi.com/cj/1/astrologian.png"},
-		{"sage",        "Sage",        "https://xivapi.com/cj/1/sage.png"},
+		{"sage",        "Sage",        "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062122_hr1.tex&format=png"},
 	},
 	"melee": {
 		{"monk",    "Monk",    "https://xivapi.com/cj/1/monk.png"},
 		{"dragoon", "Dragoon", "https://xivapi.com/cj/1/dragoon.png"},
 		{"ninja",   "Ninja",   "https://xivapi.com/cj/1/ninja.png"},
 		{"samurai", "Samurai", "https://xivapi.com/cj/1/samurai.png"},
-		{"reaper",  "Reaper",  "https://xivapi.com/cj/1/reaper.png"},
-		{"viper",   "Viper",   "https://xivapi.com/cj/1/viper.png"},
+		{"reaper",  "Reaper",  "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062121_hr1.tex&format=png"},
+		{"viper",   "Viper",   "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062123_hr1.tex&format=png"},
 	},
 	"ranged": {
 		{"bard",      "Bard",      "https://xivapi.com/cj/1/bard.png"},
@@ -80,7 +80,7 @@ var jobsByRole = map[string][]jobDef{
 		{"blackmage",   "Black Mage",  "https://xivapi.com/cj/1/blackmage.png"},
 		{"summoner",    "Summoner",    "https://xivapi.com/cj/1/summoner.png"},
 		{"redmage",     "Red Mage",    "https://xivapi.com/cj/1/redmage.png"},
-		{"pictomancer", "Pictomancer", "https://xivapi.com/cj/1/pictomancer.png"},
+		{"pictomancer", "Pictomancer", "https://beta.xivapi.com/api/1/asset?path=ui/icon/062000/062124_hr1.tex&format=png"},
 	},
 }
 
