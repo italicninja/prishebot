@@ -177,14 +177,18 @@
 
       </div>
 
-      {{ if not .Closed }}
       <div class="raid-card-foot">
+        {{ if not .Closed }}
         <form method="POST" action="/dashboard/server/{{ $.Guild.ID }}/raids/{{ .ID }}/close"
               onsubmit="return confirm('Close sign-ups for {{ .Title }}?')">
           <button type="submit" class="btn btn-ghost btn-sm">Close sign-ups</button>
         </form>
+        {{ end }}
+        <form method="POST" action="/dashboard/server/{{ $.Guild.ID }}/raids/{{ .ID }}/delete"
+              onsubmit="return confirm('Delete “{{ .Title }}” and remove the Discord post? This cannot be undone.')">
+          <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--red,#ed4245);">Delete</button>
+        </form>
       </div>
-      {{ end }}
     </div>
     {{ end }}
   </div>

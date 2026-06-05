@@ -639,6 +639,19 @@ func (m *Module) Commands() []*discordgo.ApplicationCommand {
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "delete",
+					Description: "Delete a raid and remove its Discord post (creator or server admin only)",
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "id",
+							Description: "Raid ID shown in the embed footer",
+							Required:    true,
+						},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "list",
 					Description: "List open raid sign-ups in this server",
 				},
@@ -663,6 +676,8 @@ func (m *Module) HandleInteraction(s *discordgo.Session, i *discordgo.Interactio
 			m.handleCreate(s, i, opts[0])
 		case "close":
 			m.handleClose(s, i, opts[0])
+		case "delete":
+			m.handleDelete(s, i, opts[0])
 		case "list":
 			m.handleList(s, i)
 		}
@@ -908,6 +923,59 @@ func (m *Module) handleClose(s *discordgo.Session, i *discordgo.InteractionCreat
 		Embeds: &[]*discordgo.MessageEmbed{embed}, Components: &components,
 	})
 	ephemeralRespond(s, i, fmt.Sprintf("🔒 Sign-ups for **%s** are now closed.", title))
+}
+
+func (m *Module) handleDelete(s *discordgo.Session, i *discordgo.InteractionCreate, sub *discordgo.ApplicationCommandInteractionDataOption) {
+	if len(sub.Options) == 0 {
+		return
+	}
+	id := strings.TrimSpace(sub.Options[0].StringValue())
+
+	m.mu.Lock()
+	raid, ok := m.raids[id]
+	if !ok || raid.GuildID != i.GuildID {
+		m.mu.Unlock()
+		ephemeralRespond(s, i, "❌ Raid not found. Check the ID in the embed footer.")
+		return
+	}
+	if raid.CreatorID != i.Member.User.ID && i.Member.Permissions&discordgo.PermissionManageGuild == 0 {
+		m.mu.Unlock()
+		ephemeralRespond(s, i, "❌ Only the raid creator or a server admin can delete a raid.")
+		return
+	}
+	channelID, messageID, title := raid.ChannelID, raid.MessageID, raid.Title
+	delete(m.raids, id)
+	m.mu.Unlock()
+	m.save()
+
+	if channelID != "" && messageID != "" {
+		if err := s.ChannelMessageDelete(channelID, messageID); err != nil {
+			log.Printf("[raid] delete %s: failed to delete Discord message %s/%s: %v", id, channelID, messageID, err)
+		}
+	}
+	ephemeralRespond(s, i, fmt.Sprintf("🗑️ **%s** has been deleted.", title))
+}
+
+// DeleteRaid removes a raid from the store and deletes its Discord message.
+// Returns false if the raid was not found or belongs to a different guild.
+func (m *Module) DeleteRaid(s *discordgo.Session, guildID, raidID string) bool {
+	m.mu.Lock()
+	r, ok := m.raids[raidID]
+	if !ok || r.GuildID != guildID {
+		m.mu.Unlock()
+		return false
+	}
+	channelID, messageID := r.ChannelID, r.MessageID
+	delete(m.raids, raidID)
+	m.mu.Unlock()
+	m.save()
+
+	if s != nil && channelID != "" && messageID != "" {
+		if err := s.ChannelMessageDelete(channelID, messageID); err != nil {
+			log.Printf("[raid] delete %s: failed to delete Discord message %s/%s: %v", raidID, channelID, messageID, err)
+		}
+	}
+	return true
 }
 
 func (m *Module) handleList(s *discordgo.Session, i *discordgo.InteractionCreate) {

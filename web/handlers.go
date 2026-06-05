@@ -1227,6 +1227,25 @@ func (s *Server) handleCloseRaidWeb(c *gin.Context) {
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids")
 }
 
+// handleDeleteRaidWeb deletes a raid and its Discord message, then redirects back.
+func (s *Server) handleDeleteRaidWeb(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	if requireGuildAccess(c, sess, guildID, false) == nil {
+		return
+	}
+
+	raidID := c.Param("raidID")
+	if mod, ok := s.bot.Modules()["raid"]; ok {
+		if rm, ok := mod.(*raid.Module); ok {
+			rm.DeleteRaid(s.bot.Session(), guildID, raidID)
+		}
+	}
+
+	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids")
+}
+
 // handleCreateRaidWeb creates a raid from the web dashboard and posts its embed
 // to the chosen Discord channel.
 func (s *Server) handleCreateRaidWeb(c *gin.Context) {
