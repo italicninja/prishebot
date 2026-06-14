@@ -96,6 +96,12 @@
   <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.6rem;">Fights <span class="muted">· {{ len .Fights }}</span></div>
   <div class="la-fights" style="margin-bottom:1.5rem;">
     {{ $gid := $.Guild.ID }}{{ $code := .Code }}{{ $sel := $.SelectedFight }}
+    <a class="la-fight{{ if eq $sel 0 }} active{{ end }}"
+       href="/dashboard/server/{{ $gid }}/loganalyze?report={{ $code }}">
+      <span class="la-mono">📊</span>
+      <span class="la-fight-name">Whole report summary</span>
+      <span class="la-meta">{{ len .Fights }} pulls</span>
+    </a>
     {{ range .Fights }}
     <a class="la-fight{{ if eq .ID $sel }} active{{ end }}"
        href="/dashboard/server/{{ $gid }}/loganalyze?report={{ $code }}&fight={{ .ID }}">
@@ -110,18 +116,46 @@
   {{ end }}
 
   {{ with .Analysis }}
-  <!-- ── Selected-fight analysis ──────────────────────────────────────────── -->
+  <!-- ── Analysis (whole report by default, or a single fight) ────────────── -->
   <div class="card">
     <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:1rem;">
-      <span style="font-size:1.05rem;font-weight:700;">⚔️ {{ .Fight.Name }}</span>
-      {{ if .Fight.Kill }}<span class="badge badge-green">Kill</span>{{ else }}<span class="badge badge-closed">{{ .Fight.Outcome }}</span>{{ end }}
-      <span class="la-meta">⏱ {{ .Fight.Duration }}</span>
+      {{ if .WholeReport }}
+        <span style="font-size:1.05rem;font-weight:700;">📊 Whole-report summary</span>
+        <span class="la-meta">{{ .TotalDeaths }} deaths · ⏱ {{ .DurationStr }} combat</span>
+      {{ else }}
+        <span style="font-size:1.05rem;font-weight:700;">⚔️ {{ .Fight.Name }}</span>
+        {{ if .Fight.Kill }}<span class="badge badge-green">Kill</span>{{ else }}<span class="badge badge-closed">{{ .Fight.Outcome }}</span>{{ end }}
+        <span class="la-meta">⏱ {{ .Fight.Duration }}</span>
+      {{ end }}
     </div>
 
     <!-- Deaths -->
-    <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:0.5rem 0 0.5rem;">💀 Deaths <span class="muted">· {{ len .Deaths }}</span></div>
+    <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:0.5rem 0 0.5rem;">💀 Deaths <span class="muted">· {{ .TotalDeaths }}</span></div>
     {{ if not .Deaths }}
-      <p class="la-meta" style="margin:0 0 1rem;">No deaths in this fight — clean run! 🎉</p>
+      <p class="la-meta" style="margin:0 0 1rem;">No deaths — clean! 🎉</p>
+    {{ else if .WholeReport }}
+      <div class="la-cols">
+        <div>
+          <div class="la-meta" style="margin-bottom:0.4rem;font-weight:600;">By player</div>
+          <table class="la-table">
+            <tbody>
+              {{ range .DeathsByPlayer }}
+              <tr><td class="la-mono" style="width:3rem;">{{ .Count }}×</td><td>{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</td></tr>
+              {{ end }}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <div class="la-meta" style="margin-bottom:0.4rem;font-weight:600;">Causes of death</div>
+          <table class="la-table">
+            <tbody>
+              {{ range .DeathsByCause }}
+              <tr><td class="la-mono" style="width:3rem;">{{ .Count }}×</td><td>{{ .Cause }}</td></tr>
+              {{ end }}
+            </tbody>
+          </table>
+        </div>
+      </div>
     {{ else }}
       <div class="la-cols">
         <div>
@@ -152,9 +186,9 @@
     {{ end }}
 
     <!-- DPS -->
-    <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:1.25rem 0 0.5rem;">🔥 DPS ranking</div>
+    <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:1.25rem 0 0.5rem;">🔥 DPS ranking{{ if .WholeReport }} <span class="muted">· whole report</span>{{ end }}</div>
     {{ if not .DPS }}
-      <p class="la-meta" style="margin:0;">No damage data available for this fight.</p>
+      <p class="la-meta" style="margin:0;">No damage data available.</p>
     {{ else }}
       <table class="la-table">
         <thead><tr><th>#</th><th>Player</th><th>DPS</th><th>Total damage</th></tr></thead>
@@ -169,7 +203,7 @@
           {{ end }}
         </tbody>
       </table>
-      <p class="la-meta" style="margin:0.6rem 0 0;font-size:0.75rem;">DPS = total damage over the encounter duration.</p>
+      <p class="la-meta" style="margin:0.6rem 0 0;font-size:0.75rem;">DPS = total damage over the {{ if .WholeReport }}combined active combat{{ else }}encounter{{ end }} duration.</p>
     {{ end }}
   </div>
   {{ end }}

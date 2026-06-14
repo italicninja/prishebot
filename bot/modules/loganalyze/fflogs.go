@@ -4,8 +4,8 @@
 // report code) and get a breakdown of deaths, death causes, and DPS.
 //
 // This file holds the FFLogs API client and the analysis logic. The Discord
-// and web layers consume the structured ReportInfo / FightAnalysis results so
-// the formatting concerns stay out of here.
+// and web layers consume the structured ReportInfo / Analysis results so the
+// formatting concerns stay out of here.
 package loganalyze
 
 import (
@@ -93,6 +93,40 @@ func (r *ReportInfo) StartDateStr() string {
 	return time.Unix(r.StartTime/1000, 0).UTC().Format("Jan 2, 2006 · 15:04 UTC")
 }
 
+// Kills counts how many fights in the report ended in a kill.
+func (r *ReportInfo) Kills() int {
+	n := 0
+	for _, f := range r.Fights {
+		if f.Kill {
+			n++
+		}
+	}
+	return n
+}
+
+// Wipes counts how many fights ended without a kill.
+func (r *ReportInfo) Wipes() int { return len(r.Fights) - r.Kills() }
+
+// BestPull returns the most successful attempt: the first kill if any, else the
+// wipe that pushed the boss to the lowest HP %. Returns nil for an empty report.
+func (r *ReportInfo) BestPull() *FightInfo {
+	var best *FightInfo
+	for i := range r.Fights {
+		f := &r.Fights[i]
+		if f.Kill {
+			return f
+		}
+		// Among wipes, lowest boss HP % wins. Treat 0 (unknown) as "no progress".
+		if f.BossPct <= 0 {
+			continue
+		}
+		if best == nil || f.BossPct < best.BossPct {
+			best = f
+		}
+	}
+	return best
+}
+
 // FightInfo summarises a single pull/fight within a report.
 type FightInfo struct {
 	ID         int
@@ -110,7 +144,7 @@ func (f FightInfo) DurationMS() int64 { return f.EndTime - f.StartTime }
 // Duration returns a friendly "M:SS" fight length.
 func (f FightInfo) Duration() string { return formatDuration(f.DurationMS()) }
 
-// Outcome is "Kill" or "Wipe (NN%)" for display.
+// Outcome is "Kill" or "Wipe · NN%" for display.
 func (f FightInfo) Outcome() string {
 	if f.Kill {
 		return "Kill"
@@ -121,24 +155,37 @@ func (f FightInfo) Outcome() string {
 	return "Wipe"
 }
 
-// FightAnalysis is the deaths + DPS breakdown for one chosen fight.
-type FightAnalysis struct {
-	Fight         FightInfo
-	TotalTimeMS   int64
-	Deaths        []DeathInfo  // chronological
-	DeathsByCause []CauseCount // grouped by killing ability, most common first
-	DPS           []DPSEntry   // highest DPS first
+// Analysis is the deaths + DPS breakdown for either a single fight or the whole
+// report (the default). For a single fight, Deaths is the per-death list; for a
+// whole-report summary, the per-cause and per-player rollups are the focus.
+type Analysis struct {
+	WholeReport bool       // true when this summarises the whole report
+	Fight       *FightInfo // set only for a single-fight analysis
+	Scope       string     // human label, e.g. "Whole report" or the fight name
+	DurationMS  int64      // analysed combat time (fight length, or summed active time)
+
+	TotalDeaths    int
+	Deaths         []DeathInfo    // chronological
+	DeathsByCause  []CauseCount   // grouped by killing mechanic, most common first
+	DeathsByPlayer []PlayerDeaths // grouped by player, most deaths first
+
+	DPS []DPSEntry // highest DPS first
 }
 
-// DeathInfo is one player death within a fight.
+// DurationStr renders the analysed combat time as "M:SS".
+func (a *Analysis) DurationStr() string { return formatDuration(a.DurationMS) }
+
+// DeathInfo is one player death.
 type DeathInfo struct {
-	Player string
-	Job    string // pretty-printed, e.g. "Dark Knight"
-	TimeMS int64  // ms into the fight
-	Cause  string // killing ability, or "Unknown"
+	Player    string
+	Job       string // pretty-printed, e.g. "Dark Knight"
+	FightID   int
+	FightName string
+	TimeMS    int64  // ms into the fight it occurred in
+	Cause     string // killing mechanic, or "Unknown"
 }
 
-// TimeStr renders the death time as "M:SS" into the fight.
+// TimeStr renders the death time as "M:SS" into its fight.
 func (d DeathInfo) TimeStr() string { return formatDuration(d.TimeMS) }
 
 // CauseCount is a death-cause tally for the "causes of death" breakdown.
@@ -147,7 +194,14 @@ type CauseCount struct {
 	Count int
 }
 
-// DPSEntry is one player's damage contribution within a fight.
+// PlayerDeaths is a per-player death tally.
+type PlayerDeaths struct {
+	Player string
+	Job    string
+	Count  int
+}
+
+// DPSEntry is one player's damage contribution.
 type DPSEntry struct {
 	Rank   int // 1-based position in the ranking
 	Player string
@@ -238,7 +292,7 @@ func (c *Client) query(ctx context.Context, q string, vars map[string]any, out a
 	}
 	defer resp.Body.Close()
 
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}
@@ -291,6 +345,9 @@ query ($code: String!) {
   }
 }`
 
+// tablesQuery fetches the Deaths and DamageDone tables together. $fightIDs is
+// optional: omitted (null) it covers the whole report, otherwise just the
+// listed fight(s).
 const tablesQuery = `
 query ($code: String!, $fightIDs: [Int]) {
   reportData {
@@ -315,14 +372,13 @@ func (c *Client) FetchReport(ctx context.Context, code string) (*ReportInfo, err
 					Name string `json:"name"`
 				} `json:"zone"`
 				Fights []struct {
-					ID              int     `json:"id"`
-					Name            string  `json:"name"`
-					Kill            *bool   `json:"kill"`
-					Difficulty      *int    `json:"difficulty"`
-					BossPercentage  float64 `json:"bossPercentage"`
-					FightPercentage float64 `json:"fightPercentage"`
-					StartTime       int64   `json:"startTime"`
-					EndTime         int64   `json:"endTime"`
+					ID             int     `json:"id"`
+					Name           string  `json:"name"`
+					Kill           *bool   `json:"kill"`
+					Difficulty     *int    `json:"difficulty"`
+					BossPercentage float64 `json:"bossPercentage"`
+					StartTime      int64   `json:"startTime"`
+					EndTime        int64   `json:"endTime"`
 				} `json:"fights"`
 			} `json:"report"`
 		} `json:"reportData"`
@@ -332,7 +388,7 @@ func (c *Client) FetchReport(ctx context.Context, code string) (*ReportInfo, err
 	}
 	r := resp.ReportData.Report
 	if r == nil {
-		return nil, fmt.Errorf("report %q not found (it may be private or the code is wrong)", code)
+		return nil, fmt.Errorf("report %q not found (it may be private, or the code is wrong)", code)
 	}
 
 	info := &ReportInfo{
@@ -365,12 +421,11 @@ func (c *Client) FetchReport(ctx context.Context, code string) (*ReportInfo, err
 	return info, nil
 }
 
-// Analyze fetches the report overview, picks a fight to analyze, then fetches
-// and parses that fight's death and DPS tables. When fightID <= 0 it defaults
-// to the most recent boss kill, falling back to the longest pull. It returns
-// the full report (so callers can list every fight) alongside the chosen
-// fight's analysis.
-func (c *Client) Analyze(ctx context.Context, code string, fightID int) (*ReportInfo, *FightAnalysis, error) {
+// Analyze fetches the report overview and a deaths/DPS breakdown. When fightID
+// is > 0, the breakdown is scoped to that fight; otherwise it summarises the
+// whole report (every pull combined) - this is the default. It returns the full
+// report (so callers can list every fight) alongside the analysis.
+func (c *Client) Analyze(ctx context.Context, code string, fightID int) (*ReportInfo, *Analysis, error) {
 	info, err := c.FetchReport(ctx, code)
 	if err != nil {
 		return nil, nil, err
@@ -379,9 +434,36 @@ func (c *Client) Analyze(ctx context.Context, code string, fightID int) (*Report
 		return info, nil, fmt.Errorf("this report has no fights to analyze")
 	}
 
-	fight := chooseFight(info.Fights, fightID)
-	if fight == nil {
-		return info, nil, fmt.Errorf("fight %d not found in this report", fightID)
+	// Per-fight start time and name, used to convert report-relative death
+	// timestamps into "time into the fight" and to label deaths.
+	startByID := make(map[int]int64, len(info.Fights))
+	nameByID := make(map[int]string, len(info.Fights))
+	for _, f := range info.Fights {
+		startByID[f.ID] = f.StartTime
+		nameByID[f.ID] = f.Name
+	}
+
+	a := &Analysis{}
+	vars := map[string]any{"code": code}
+	if fightID > 0 {
+		f := findFight(info.Fights, fightID)
+		if f == nil {
+			return info, nil, fmt.Errorf("fight %d not found in this report", fightID)
+		}
+		a.Fight = f
+		a.Scope = f.Name
+		a.DurationMS = f.DurationMS()
+		vars["fightIDs"] = []int{f.ID}
+	} else {
+		a.WholeReport = true
+		a.Scope = "Whole report"
+		// The table query rejects an absent fight list, so pass every fight id
+		// explicitly to cover the whole report.
+		ids := make([]int, 0, len(info.Fights))
+		for _, f := range info.Fights {
+			ids = append(ids, f.ID)
+		}
+		vars["fightIDs"] = ids
 	}
 
 	var resp struct {
@@ -392,54 +474,36 @@ func (c *Client) Analyze(ctx context.Context, code string, fightID int) (*Report
 			} `json:"report"`
 		} `json:"reportData"`
 	}
-	vars := map[string]any{"code": code, "fightIDs": []int{fight.ID}}
 	if err := c.query(ctx, tablesQuery, vars, &resp); err != nil {
 		return info, nil, err
 	}
 
-	analysis := &FightAnalysis{Fight: *fight}
-	analysis.Deaths, analysis.DeathsByCause = parseDeaths(resp.ReportData.Report.Deaths, fight.StartTime)
-	analysis.DPS, analysis.TotalTimeMS = parseDamage(resp.ReportData.Report.Damage, fight.DurationMS())
-	return info, analysis, nil
+	a.Deaths = parseDeaths(resp.ReportData.Report.Deaths, startByID, nameByID)
+	a.TotalDeaths = len(a.Deaths)
+	a.DeathsByCause = groupByCause(a.Deaths)
+	a.DeathsByPlayer = groupByPlayer(a.Deaths)
+
+	dps, totalTime := parseDamage(resp.ReportData.Report.Damage, a.DurationMS)
+	a.DPS = dps
+	if a.WholeReport && totalTime > 0 {
+		a.DurationMS = totalTime // summed active combat time across pulls
+	}
+	return info, a, nil
 }
 
-// chooseFight selects which fight to analyze. An explicit id wins; otherwise we
-// prefer the most recent kill, then fall back to the longest pull (the most
-// representative attempt when there's no clear).
-func chooseFight(fights []FightInfo, fightID int) *FightInfo {
-	if fightID > 0 {
-		for i := range fights {
-			if fights[i].ID == fightID {
-				return &fights[i]
-			}
-		}
-		return nil
-	}
-	var best *FightInfo
-	// Most recent kill (highest id among kills).
+func findFight(fights []FightInfo, id int) *FightInfo {
 	for i := range fights {
-		if fights[i].Kill {
-			if best == nil || fights[i].ID > best.ID {
-				best = &fights[i]
-			}
+		if fights[i].ID == id {
+			return &fights[i]
 		}
 	}
-	if best != nil {
-		return best
-	}
-	// No kill: longest pull.
-	for i := range fights {
-		if best == nil || fights[i].DurationMS() > best.DurationMS() {
-			best = &fights[i]
-		}
-	}
-	return best
+	return nil
 }
 
 // ── Table parsing ───────────────────────────────────────────────────────────
 
-// tableEnvelope is the common { "data": { "entries": [...] } } shape the
-// FFLogs `table` scalar returns for both Deaths and DamageDone.
+// tableEnvelope is the { "data": { "entries": [...] } } shape the FFLogs `table`
+// scalar returns for both Deaths and DamageDone.
 type tableEnvelope struct {
 	Data struct {
 		Entries   []tableEntry `json:"entries"`
@@ -447,66 +511,120 @@ type tableEnvelope struct {
 	} `json:"data"`
 }
 
+// tableEntry covers fields from both the Deaths and DamageDone tables. Numeric
+// fields are float64 because FFLogs may return large values in scientific
+// notation, which fails to unmarshal into an integer type.
 type tableEntry struct {
-	Name       string `json:"name"`
-	Type       string `json:"type"` // job/class, e.g. "DarkKnight"
-	Total      int64  `json:"total"`
-	ActiveTime int64  `json:"activeTime"`
-	DeathTime  int64  `json:"deathTime"` // ms, report-relative (Deaths only)
-	Ability    *struct {
-		Name string `json:"name"`
-	} `json:"ability"` // killing blow (Deaths only)
+	Name      string  `json:"name"`
+	Type      string  `json:"type"`      // job/class, e.g. "DarkKnight"
+	Total     float64 `json:"total"`     // DamageDone: total damage dealt
+	Timestamp int64   `json:"timestamp"` // Deaths: report-relative time of death (ms)
+	Fight     int     `json:"fight"`     // Deaths: the fight the death occurred in
+	// Deaths: breakdown of damage taken in the death window. The ability that
+	// dealt the most is treated as the killing mechanic.
+	Damage *struct {
+		Abilities []struct {
+			Name  string  `json:"name"`
+			Total float64 `json:"total"`
+		} `json:"abilities"`
+	} `json:"damage"`
 }
 
-// parseDeaths converts the Deaths table into a chronological death list and a
-// grouped cause tally. fightStart is the fight's report-relative start in ms,
-// used to convert absolute death times into "time into fight".
-func parseDeaths(raw json.RawMessage, fightStart int64) ([]DeathInfo, []CauseCount) {
+// killingMechanic returns the name of the ability that dealt the most damage in
+// the player's death window, or "Unknown" when none is available.
+func (e tableEntry) killingMechanic() string {
+	if e.Damage == nil || len(e.Damage.Abilities) == 0 {
+		return "Unknown"
+	}
+	best := e.Damage.Abilities[0]
+	for _, ab := range e.Damage.Abilities[1:] {
+		if ab.Total > best.Total {
+			best = ab
+		}
+	}
+	if strings.TrimSpace(best.Name) == "" {
+		return "Unknown"
+	}
+	return best.Name
+}
+
+// parseDeaths converts the Deaths table into a chronological death list. Death
+// times are made relative to the fight they occurred in via startByID.
+func parseDeaths(raw json.RawMessage, startByID map[int]int64, nameByID map[int]string) []DeathInfo {
 	if len(raw) == 0 {
-		return nil, nil
+		return nil
 	}
 	var env tableEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, nil
+		return nil
 	}
 
 	deaths := make([]DeathInfo, 0, len(env.Data.Entries))
-	causes := map[string]int{}
 	for _, e := range env.Data.Entries {
-		cause := "Unknown"
-		if e.Ability != nil && strings.TrimSpace(e.Ability.Name) != "" {
-			cause = e.Ability.Name
-		}
-		rel := max(e.DeathTime-fightStart, 0)
+		rel := max(e.Timestamp-startByID[e.Fight], 0)
 		deaths = append(deaths, DeathInfo{
-			Player: e.Name,
-			Job:    prettyJob(e.Type),
-			TimeMS: rel,
-			Cause:  cause,
+			Player:    e.Name,
+			Job:       prettyJob(e.Type),
+			FightID:   e.Fight,
+			FightName: nameByID[e.Fight],
+			TimeMS:    rel,
+			Cause:     e.killingMechanic(),
 		})
-		causes[cause]++
 	}
-
-	sort.SliceStable(deaths, func(i, j int) bool { return deaths[i].TimeMS < deaths[j].TimeMS })
-
-	grouped := make([]CauseCount, 0, len(causes))
-	for cause, n := range causes {
-		grouped = append(grouped, CauseCount{Cause: cause, Count: n})
-	}
-	sort.SliceStable(grouped, func(i, j int) bool {
-		if grouped[i].Count != grouped[j].Count {
-			return grouped[i].Count > grouped[j].Count
+	sort.SliceStable(deaths, func(i, j int) bool {
+		if deaths[i].FightID != deaths[j].FightID {
+			return deaths[i].FightID < deaths[j].FightID
 		}
-		return grouped[i].Cause < grouped[j].Cause
+		return deaths[i].TimeMS < deaths[j].TimeMS
 	})
-	return deaths, grouped
+	return deaths
+}
+
+// groupByCause tallies deaths by killing mechanic, most common first.
+func groupByCause(deaths []DeathInfo) []CauseCount {
+	counts := map[string]int{}
+	for _, d := range deaths {
+		counts[d.Cause]++
+	}
+	out := make([]CauseCount, 0, len(counts))
+	for cause, n := range counts {
+		out = append(out, CauseCount{Cause: cause, Count: n})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Cause < out[j].Cause
+	})
+	return out
+}
+
+// groupByPlayer tallies deaths by player, most deaths first.
+func groupByPlayer(deaths []DeathInfo) []PlayerDeaths {
+	idx := map[string]int{}
+	var out []PlayerDeaths
+	for _, d := range deaths {
+		if i, ok := idx[d.Player]; ok {
+			out[i].Count++
+			continue
+		}
+		idx[d.Player] = len(out)
+		out = append(out, PlayerDeaths{Player: d.Player, Job: d.Job, Count: 1})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Player < out[j].Player
+	})
+	return out
 }
 
 // parseDamage converts the DamageDone table into a DPS ranking. The per-second
 // figure uses the encounter duration (table totalTime, falling back to the
-// fight length) as the denominator so every player is compared over the same
-// window.
-func parseDamage(raw json.RawMessage, fightDurationMS int64) ([]DPSEntry, int64) {
+// supplied duration) as the denominator so every player is compared over the
+// same window.
+func parseDamage(raw json.RawMessage, fallbackMS int64) ([]DPSEntry, int64) {
 	if len(raw) == 0 {
 		return nil, 0
 	}
@@ -517,7 +635,7 @@ func parseDamage(raw json.RawMessage, fightDurationMS int64) ([]DPSEntry, int64)
 
 	durationMS := env.Data.TotalTime
 	if durationMS <= 0 {
-		durationMS = fightDurationMS
+		durationMS = fallbackMS
 	}
 	seconds := float64(durationMS) / 1000.0
 
@@ -528,12 +646,12 @@ func parseDamage(raw json.RawMessage, fightDurationMS int64) ([]DPSEntry, int64)
 		}
 		dps := 0.0
 		if seconds > 0 {
-			dps = float64(e.Total) / seconds
+			dps = e.Total / seconds
 		}
 		entries = append(entries, DPSEntry{
 			Player: e.Name,
 			Job:    prettyJob(e.Type),
-			Total:  e.Total,
+			Total:  int64(e.Total),
 			DPS:    dps,
 		})
 	}

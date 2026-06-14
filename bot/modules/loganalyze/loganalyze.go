@@ -15,13 +15,15 @@ import (
 const (
 	colorKill = 0x57F287
 	colorWipe = 0xED4245
+	colorInfo = 0x5865F2
 )
 
 // Display caps keep the Discord embed within field/length limits.
 const (
-	maxDeathLines = 10
-	maxCauseLines = 6
-	maxDPSLines   = 12
+	maxDeathLines  = 10
+	maxCauseLines  = 8
+	maxPlayerLines = 12
+	maxDPSLines    = 12
 )
 
 // Module implements bot.Module for FFXIV log analysis.
@@ -61,7 +63,7 @@ func (m *Module) Commands() []*discordgo.ApplicationCommand {
 				{
 					Type:        discordgo.ApplicationCommandOptionInteger,
 					Name:        "fight",
-					Description: "Fight/pull number to analyze (defaults to the last kill or longest pull)",
+					Description: "Pull number to drill into (omit to summarize the whole report)",
 					Required:    false,
 				},
 			},
@@ -124,20 +126,34 @@ func (m *Module) HandleInteraction(s *discordgo.Session, i *discordgo.Interactio
 	}
 }
 
-// buildEmbed renders the analysis as a Discord embed.
-func (m *Module) buildEmbed(info *ReportInfo, a *FightAnalysis) *discordgo.MessageEmbed {
-	f := a.Fight
-
-	color := colorWipe
-	if f.Kill {
-		color = colorKill
+// buildEmbed renders the analysis as a Discord embed. It covers both the
+// whole-report summary (the default) and a single-fight drill-down.
+func (m *Module) buildEmbed(info *ReportInfo, a *Analysis) *discordgo.MessageEmbed {
+	color := colorInfo
+	fightID := 0
+	if a.Fight != nil {
+		fightID = a.Fight.ID
+		if a.Fight.Kill {
+			color = colorKill
+		} else {
+			color = colorWipe
+		}
 	}
 
+	// ── Header ───────────────────────────────────────────────────────────────
 	var header []string
 	if info.Zone != "" {
 		header = append(header, "📍 "+info.Zone)
 	}
-	header = append(header, fmt.Sprintf("⚔️ **%s** · %s · ⏱ %s", f.Name, f.Outcome(), f.Duration()))
+	if a.WholeReport {
+		header = append(header, fmt.Sprintf("🎯 **%d** pulls · **%d** kills · **%d** wipes · ⏱ %s combat",
+			len(info.Fights), info.Kills(), info.Wipes(), a.DurationStr()))
+		if bp := info.BestPull(); bp != nil {
+			header = append(header, "🥇 Best pull: **"+bp.Name+"** · "+bp.Outcome())
+		}
+	} else {
+		header = append(header, fmt.Sprintf("⚔️ **%s** · %s · ⏱ %s", a.Fight.Name, a.Fight.Outcome(), a.Fight.Duration()))
+	}
 	if u := info.StartUnix(); u > 0 {
 		header = append(header, fmt.Sprintf("🗓 <t:%d:f>", u))
 	}
@@ -145,85 +161,137 @@ func (m *Module) buildEmbed(info *ReportInfo, a *FightAnalysis) *discordgo.Messa
 		header = append(header, "👤 Uploaded by "+info.Owner)
 	}
 
+	footer := fmt.Sprintf("Report %s · Powered by FFLogs", info.Code)
+	if !a.WholeReport {
+		footer = fmt.Sprintf("Report %s · Fight #%d · Powered by FFLogs", info.Code, fightID)
+	}
 	embed := &discordgo.MessageEmbed{
 		Title:       "📊 " + nonEmpty(info.Title, "FFLogs Report"),
-		URL:         m.reportURL(info.Code, f.ID),
+		URL:         reportURL(info.Code, fightID),
 		Color:       color,
 		Description: strings.Join(header, "\n"),
-		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Report %s · Fight #%d · Powered by FFLogs", info.Code, f.ID)},
+		Footer:      &discordgo.MessageEmbedFooter{Text: footer},
 	}
 
 	// ── Deaths ───────────────────────────────────────────────────────────────
-	if len(a.Deaths) == 0 {
+	if a.TotalDeaths == 0 {
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:  "💀 Deaths (0)",
-			Value: "No deaths — clean run! 🎉",
+			Value: "No deaths — clean! 🎉",
+		})
+	} else if a.WholeReport {
+		// Whole report: who's dying, not every individual death.
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   fmt.Sprintf("💀 Deaths (%d) — by player", a.TotalDeaths),
+			Value:  playerDeathLines(a.DeathsByPlayer),
+			Inline: true,
 		})
 	} else {
-		var b strings.Builder
-		shown := a.Deaths
-		if len(shown) > maxDeathLines {
-			shown = shown[:maxDeathLines]
-		}
-		for _, d := range shown {
-			job := d.Job
-			if job != "" {
-				job = " *(" + job + ")*"
-			}
-			fmt.Fprintf(&b, "`%s` **%s**%s — %s\n", d.TimeStr(), d.Player, job, d.Cause)
-		}
-		if len(a.Deaths) > maxDeathLines {
-			fmt.Fprintf(&b, "…and %d more", len(a.Deaths)-maxDeathLines)
-		}
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:  fmt.Sprintf("💀 Deaths (%d)", len(a.Deaths)),
-			Value: strings.TrimSpace(b.String()),
+			Name:  fmt.Sprintf("💀 Deaths (%d)", a.TotalDeaths),
+			Value: deathLines(a.Deaths),
 		})
 	}
 
 	// ── Causes of death ──────────────────────────────────────────────────────
 	if len(a.DeathsByCause) > 0 {
-		var b strings.Builder
-		shown := a.DeathsByCause
-		if len(shown) > maxCauseLines {
-			shown = shown[:maxCauseLines]
-		}
-		for _, c := range shown {
-			fmt.Fprintf(&b, "**%d×** %s\n", c.Count, c.Cause)
-		}
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   "☠️ Causes of death",
-			Value:  strings.TrimSpace(b.String()),
+			Value:  causeLines(a.DeathsByCause),
 			Inline: true,
 		})
 	}
 
 	// ── DPS ──────────────────────────────────────────────────────────────────
 	if len(a.DPS) > 0 {
-		var b strings.Builder
-		shown := a.DPS
-		if len(shown) > maxDPSLines {
-			shown = shown[:maxDPSLines]
-		}
-		for idx, e := range shown {
-			job := e.Job
-			if job != "" {
-				job = " *(" + job + ")*"
-			}
-			fmt.Fprintf(&b, "`%2d.` **%s** dps — %s%s\n", idx+1, e.DPSStr(), e.Player, job)
+		title := "🔥 DPS ranking"
+		if a.WholeReport {
+			title = "🔥 DPS ranking (whole report)"
 		}
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "🔥 DPS ranking",
-			Value:  strings.TrimSpace(b.String()),
-			Inline: true,
+			Name:  title,
+			Value: dpsLines(a.DPS),
 		})
 	}
 
 	return embed
 }
 
+// deathLines renders the per-death list for a single fight, capped.
+func deathLines(deaths []DeathInfo) string {
+	var b strings.Builder
+	shown := deaths
+	if len(shown) > maxDeathLines {
+		shown = shown[:maxDeathLines]
+	}
+	for _, d := range shown {
+		job := ""
+		if d.Job != "" {
+			job = " *(" + d.Job + ")*"
+		}
+		fmt.Fprintf(&b, "`%s` **%s**%s — %s\n", d.TimeStr(), d.Player, job, d.Cause)
+	}
+	if len(deaths) > maxDeathLines {
+		fmt.Fprintf(&b, "…and %d more", len(deaths)-maxDeathLines)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// playerDeathLines renders the deaths-by-player rollup, capped.
+func playerDeathLines(players []PlayerDeaths) string {
+	var b strings.Builder
+	shown := players
+	if len(shown) > maxPlayerLines {
+		shown = shown[:maxPlayerLines]
+	}
+	for _, p := range shown {
+		job := ""
+		if p.Job != "" {
+			job = " *(" + p.Job + ")*"
+		}
+		fmt.Fprintf(&b, "**%d×** %s%s\n", p.Count, p.Player, job)
+	}
+	if len(players) > maxPlayerLines {
+		fmt.Fprintf(&b, "…and %d more", len(players)-maxPlayerLines)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// causeLines renders the causes-of-death rollup, capped.
+func causeLines(causes []CauseCount) string {
+	var b strings.Builder
+	shown := causes
+	if len(shown) > maxCauseLines {
+		shown = shown[:maxCauseLines]
+	}
+	for _, c := range shown {
+		fmt.Fprintf(&b, "**%d×** %s\n", c.Count, c.Cause)
+	}
+	if len(causes) > maxCauseLines {
+		fmt.Fprintf(&b, "…and %d more", len(causes)-maxCauseLines)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// dpsLines renders the DPS ranking, capped.
+func dpsLines(dps []DPSEntry) string {
+	var b strings.Builder
+	shown := dps
+	if len(shown) > maxDPSLines {
+		shown = shown[:maxDPSLines]
+	}
+	for _, e := range shown {
+		job := ""
+		if e.Job != "" {
+			job = " *(" + e.Job + ")*"
+		}
+		fmt.Fprintf(&b, "`%2d.` **%s** — %s%s\n", e.Rank, e.DPSStr(), e.Player, job)
+	}
+	return strings.TrimSpace(b.String())
+}
+
 // reportURL builds a deep link back to the analyzed fight on FFLogs.
-func (m *Module) reportURL(code string, fightID int) string {
+func reportURL(code string, fightID int) string {
 	if fightID > 0 {
 		return fmt.Sprintf("https://www.fflogs.com/reports/%s#fight=%d", code, fightID)
 	}

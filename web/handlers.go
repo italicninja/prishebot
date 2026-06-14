@@ -1304,7 +1304,9 @@ func (s *Server) handleLogAnalyzePage(c *gin.Context) {
 			} else {
 				data["Report"] = info
 				data["Analysis"] = analysis
-				data["SelectedFight"] = analysis.Fight.ID
+				if analysis.Fight != nil {
+					data["SelectedFight"] = analysis.Fight.ID
+				}
 			}
 		}
 	}
