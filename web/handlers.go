@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/user/discord-bot-skeleton/bot"
 	"github.com/user/discord-bot-skeleton/bot/modules/birthday"
+	"github.com/user/discord-bot-skeleton/bot/modules/loganalyze"
 	"github.com/user/discord-bot-skeleton/bot/modules/raid"
 	"github.com/user/discord-bot-skeleton/bot/modules/roles"
 )
@@ -1246,6 +1248,73 @@ func (s *Server) handleDeleteRaidWeb(c *gin.Context) {
 	c.Redirect(http.StatusFound, "/dashboard/server/"+guildID+"/raids")
 }
 
+// handleLogAnalyzePage renders the FFLogs log-analysis page. With no ?report=
+// query it shows just the lookup form; with one it parses the link/code,
+// fetches the report from FFLogs, and renders the deaths/causes/DPS breakdown
+// plus a fight picker. ?fight= selects which fight to analyze.
+func (s *Server) handleLogAnalyzePage(c *gin.Context) {
+	sess := c.MustGet("session").(*Session)
+	guildID := c.Param("id")
+
+	src := requireGuildAccess(c, sess, guildID, false)
+	if src == nil {
+		return
+	}
+	guild := *src
+	guild.BotPresent = s.botGuildSet()[guildID]
+
+	// Resolve the loganalyze module's FFLogs client.
+	var client *loganalyze.Client
+	if mod, ok := s.bot.Modules()["loganalyze"]; ok {
+		if lm, ok := mod.(*loganalyze.Module); ok {
+			client = lm.Client()
+		}
+	}
+
+	data := gin.H{
+		"User":          sess,
+		"Guild":         &guild,
+		"IsAdmin":       guild.Role == RoleAdmin,
+		"Configured":    client != nil && client.Configured(),
+		"RawInput":      strings.TrimSpace(c.Query("report")),
+		"SelectedFight": 0, // always an int so the template's eq comparison is type-safe
+	}
+
+	rawInput := strings.TrimSpace(c.Query("report"))
+	if rawInput != "" && client != nil && client.Configured() {
+		code, parsedFight := loganalyze.ParseReportInput(rawInput)
+		fightID := parsedFight
+		if q := strings.TrimSpace(c.Query("fight")); q != "" {
+			if n, err := strconv.Atoi(q); err == nil {
+				fightID = n
+			}
+		}
+
+		if code == "" {
+			data["ErrMsg"] = "Couldn't find a report code in that. Paste an FFLogs link or just the code."
+		} else {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+			defer cancel()
+			info, analysis, err := client.Analyze(ctx, code, fightID)
+			if err != nil {
+				data["ErrMsg"] = err.Error()
+				if info != nil {
+					data["Report"] = info
+				}
+			} else {
+				data["Report"] = info
+				data["Analysis"] = analysis
+				data["SelectedFight"] = analysis.Fight.ID
+			}
+		}
+	}
+
+	if err := s.tmpl.ExecuteTemplate(c.Writer, "loganalyze.html", data); err != nil {
+		log.Printf("[web] loganalyze template error: %v", err)
+		c.Status(http.StatusInternalServerError)
+	}
+}
+
 // handleCreateRaidWeb creates a raid from the web dashboard and posts its embed
 // to the chosen Discord channel.
 func (s *Server) handleCreateRaidWeb(c *gin.Context) {
@@ -1575,4 +1644,3 @@ func buildSigs(prefix string, opts []*discordgo.ApplicationCommandOption) []stri
 	}
 	return []string{sb.String()}
 }
-

@@ -14,6 +14,7 @@ import (
 	"github.com/user/discord-bot-skeleton/bot"
 	"github.com/user/discord-bot-skeleton/bot/modules/birthday"
 	"github.com/user/discord-bot-skeleton/bot/modules/info"
+	"github.com/user/discord-bot-skeleton/bot/modules/loganalyze"
 	"github.com/user/discord-bot-skeleton/bot/modules/meow"
 	"github.com/user/discord-bot-skeleton/bot/modules/ping"
 	"github.com/user/discord-bot-skeleton/bot/modules/post"
@@ -117,6 +118,9 @@ func main() {
 	}
 	if err := b.LoadModule(post.New()); err != nil {
 		log.Fatalf("failed to load post module: %v", err)
+	}
+	if err := b.LoadModule(loganalyze.New(cfg.FFLogsClientID, cfg.FFLogsClientSecret)); err != nil {
+		log.Fatalf("failed to load loganalyze module: %v", err)
 	}
 
 	if err := b.Start(); err != nil {

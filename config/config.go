@@ -45,6 +45,13 @@ type Config struct {
 	// sync with what's deployed - useful for displaying environment hints
 	// (e.g. dev vs prod) right on the profile card.
 	BotDescription string
+
+	// FFLogsClientID / FFLogsClientSecret are OAuth2 client-credentials for the
+	// FFLogs v2 API, used by the loganalyze module. Create a v2 client at
+	// https://www.fflogs.com/api/clients/ . When either is empty the
+	// /loganalyze command and dashboard page report that analysis is disabled.
+	FFLogsClientID     string
+	FFLogsClientSecret string
 }
 
 // Load reads config from a .env file (if present) and then from environment
@@ -102,6 +109,9 @@ func Load() *Config {
 		BaseURL:            os.Getenv("BASE_URL"), // empty = icons not served; Discord embeds use emoji only
 
 		BotDescription: getOrDefault("BOT_DESCRIPTION", "I'm currently in development, bear with me :3"),
+
+		FFLogsClientID:     os.Getenv("FFLOGS_CLIENT_ID"),
+		FFLogsClientSecret: os.Getenv("FFLOGS_CLIENT_SECRET"),
 	}
 }
 

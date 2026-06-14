@@ -123,6 +123,7 @@ func (s *Server) routes() *gin.Engine {
 		dash.POST("/server/:id/raids/templates/:tid/delete", s.handleDeleteRaidTemplate)
 		dash.POST("/server/:id/raids/:raidID/close", s.handleCloseRaidWeb)
 		dash.POST("/server/:id/raids/:raidID/delete", s.handleDeleteRaidWeb)
+		dash.GET("/server/:id/loganalyze", s.handleLogAnalyzePage)
 	}
 
 	return r

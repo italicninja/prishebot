@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prishe - Log Analysis · {{ .Guild.Name }}</title>
+  {{ template "theme-init" . }}
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .la-table{width:100%;border-collapse:collapse;font-size:0.85rem;}
+    .la-table th{text-align:left;color:var(--muted);font-weight:600;text-transform:uppercase;
+      letter-spacing:0.04em;font-size:0.7rem;padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);}
+    .la-table td{padding:0.45rem 0.6rem;border-bottom:1px solid var(--border);}
+    .la-table tr:last-child td{border-bottom:none;}
+    .la-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);}
+    .la-job{color:var(--muted);font-size:0.8rem;}
+    .la-rank{color:var(--muted);font-family:ui-monospace,monospace;width:2rem;}
+    .la-dps{font-weight:600;color:var(--text);}
+    .la-cols{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;}
+    @media (max-width:720px){.la-cols{grid-template-columns:1fr;}}
+    .la-fights{display:flex;flex-direction:column;gap:0.35rem;}
+    .la-fight{display:flex;align-items:center;gap:0.6rem;padding:0.5rem 0.7rem;border:1px solid var(--border);
+      border-radius:8px;text-decoration:none;color:var(--text);transition:border-color .12s,background .12s;}
+    .la-fight:hover{border-color:var(--accent,#5865f2);}
+    .la-fight.active{border-color:var(--accent,#5865f2);background:color-mix(in srgb,var(--accent,#5865f2) 12%,transparent);}
+    .la-fight-name{flex:1;font-weight:500;}
+    .la-meta{color:var(--muted);font-size:0.8rem;}
+  </style>
+</head>
+<body>
+{{ template "auth-nav" . }}
+
+<div class="page">
+  <div class="crumb">
+    <a href="/dashboard" class="btn btn-ghost btn-sm">← Servers</a>
+    <a href="/dashboard/server/{{ .Guild.ID }}" class="btn btn-ghost btn-sm">{{ .Guild.Name }}</a>
+  </div>
+
+  <div class="guild-header">
+    {{ if .Guild.IconURL }}
+      <img class="guild-icon" src="{{ .Guild.IconURL }}" alt="{{ .Guild.Name }}">
+    {{ else }}
+      <div class="guild-icon-ph">{{ slice .Guild.Name 0 1 }}</div>
+    {{ end }}
+    <div>
+      <div class="guild-name">Log Analysis</div>
+      <div class="guild-sub">Paste an FFLogs report link to break down deaths, causes, and DPS</div>
+    </div>
+  </div>
+
+  {{ if not .Configured }}
+  <div class="banner banner-error" style="margin-bottom:1.25rem;">
+    <strong>FFLogs isn't connected.</strong>
+    Set <code>FFLOGS_CLIENT_ID</code> and <code>FFLOGS_CLIENT_SECRET</code> in the bot's environment.
+    Create a "v2 client" at <a href="https://www.fflogs.com/api/clients/" target="_blank" rel="noopener">fflogs.com/api/clients</a>.
+  </div>
+  {{ end }}
+
+  <!-- ── Lookup form ──────────────────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:1.5rem;">
+    <form method="GET" action="/dashboard/server/{{ .Guild.ID }}/loganalyze"
+          style="display:flex;gap:0.75rem;align-items:flex-end;flex-wrap:wrap;">
+      <div class="form-field" style="flex:1;min-width:20rem;margin:0;">
+        <label for="report">FFLogs report link or code</label>
+        <input type="text" name="report" id="report" class="form-input"
+               placeholder="https://www.fflogs.com/reports/VRjJPTzXk9NDQfpr"
+               value="{{ .RawInput }}" {{ if not .Configured }}disabled{{ end }} required>
+      </div>
+      <button type="submit" class="btn btn-primary" {{ if not .Configured }}disabled{{ end }}>Analyze</button>
+    </form>
+  </div>
+
+  {{ if .ErrMsg }}
+  <div class="banner banner-error" style="margin-bottom:1.25rem;">{{ .ErrMsg }}</div>
+  {{ end }}
+
+  {{ with .Report }}
+  <!-- ── Report overview ──────────────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:1.25rem;">
+    <div style="display:flex;align-items:baseline;gap:0.75rem;flex-wrap:wrap;">
+      <a href="https://www.fflogs.com/reports/{{ .Code }}" target="_blank" rel="noopener"
+         style="font-size:1.1rem;font-weight:700;color:var(--text);text-decoration:none;">
+        {{ if .Title }}{{ .Title }}{{ else }}FFLogs Report{{ end }} ↗
+      </a>
+    </div>
+    <div class="la-meta" style="margin-top:0.4rem;display:flex;gap:1rem;flex-wrap:wrap;">
+      {{ if .Zone }}<span>📍 {{ .Zone }}</span>{{ end }}
+      {{ if .StartDateStr }}<span>🗓 {{ .StartDateStr }}</span>{{ end }}
+      {{ if .Owner }}<span>👤 {{ .Owner }}</span>{{ end }}
+      <span class="la-mono">{{ .Code }}</span>
+    </div>
+  </div>
+
+  <!-- ── Fight picker ─────────────────────────────────────────────────────── -->
+  {{ if .Fights }}
+  <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.6rem;">Fights <span class="muted">· {{ len .Fights }}</span></div>
+  <div class="la-fights" style="margin-bottom:1.5rem;">
+    {{ $gid := $.Guild.ID }}{{ $code := .Code }}{{ $sel := $.SelectedFight }}
+    {{ range .Fights }}
+    <a class="la-fight{{ if eq .ID $sel }} active{{ end }}"
+       href="/dashboard/server/{{ $gid }}/loganalyze?report={{ $code }}&fight={{ .ID }}">
+      <span class="la-mono">#{{ .ID }}</span>
+      <span class="la-fight-name">{{ .Name }}</span>
+      {{ if .Kill }}<span class="badge badge-green">Kill</span>{{ else }}<span class="badge badge-closed">{{ .Outcome }}</span>{{ end }}
+      <span class="la-meta">⏱ {{ .Duration }}</span>
+    </a>
+    {{ end }}
+  </div>
+  {{ end }}
+  {{ end }}
+
+  {{ with .Analysis }}
+  <!-- ── Selected-fight analysis ──────────────────────────────────────────── -->
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:1rem;">
+      <span style="font-size:1.05rem;font-weight:700;">⚔️ {{ .Fight.Name }}</span>
+      {{ if .Fight.Kill }}<span class="badge badge-green">Kill</span>{{ else }}<span class="badge badge-closed">{{ .Fight.Outcome }}</span>{{ end }}
+      <span class="la-meta">⏱ {{ .Fight.Duration }}</span>
+    </div>
+
+    <!-- Deaths -->
+    <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:0.5rem 0 0.5rem;">💀 Deaths <span class="muted">· {{ len .Deaths }}</span></div>
+    {{ if not .Deaths }}
+      <p class="la-meta" style="margin:0 0 1rem;">No deaths in this fight — clean run! 🎉</p>
+    {{ else }}
+      <div class="la-cols">
+        <div>
+          <table class="la-table">
+            <thead><tr><th>Time</th><th>Player</th><th>Cause</th></tr></thead>
+            <tbody>
+              {{ range .Deaths }}
+              <tr>
+                <td class="la-mono">{{ .TimeStr }}</td>
+                <td>{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</td>
+                <td>{{ .Cause }}</td>
+              </tr>
+              {{ end }}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <div class="la-meta" style="margin-bottom:0.4rem;font-weight:600;">Causes of death</div>
+          <table class="la-table">
+            <tbody>
+              {{ range .DeathsByCause }}
+              <tr><td class="la-mono" style="width:3rem;">{{ .Count }}×</td><td>{{ .Cause }}</td></tr>
+              {{ end }}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {{ end }}
+
+    <!-- DPS -->
+    <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:1.25rem 0 0.5rem;">🔥 DPS ranking</div>
+    {{ if not .DPS }}
+      <p class="la-meta" style="margin:0;">No damage data available for this fight.</p>
+    {{ else }}
+      <table class="la-table">
+        <thead><tr><th>#</th><th>Player</th><th>DPS</th><th>Total damage</th></tr></thead>
+        <tbody>
+          {{ range .DPS }}
+          <tr>
+            <td class="la-rank">{{ .Rank }}</td>
+            <td>{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</td>
+            <td class="la-dps">{{ .DPSStr }}</td>
+            <td class="la-mono">{{ .Total }}</td>
+          </tr>
+          {{ end }}
+        </tbody>
+      </table>
+      <p class="la-meta" style="margin:0.6rem 0 0;font-size:0.75rem;">DPS = total damage over the encounter duration.</p>
+    {{ end }}
+  </div>
+  {{ end }}
+
+  {{ if and .Configured (not .RawInput) }}
+  <div class="empty" style="padding:2.5rem 1rem;">
+    <div class="empty-icon">📊</div>
+    <h2>Analyze a log</h2>
+    <p>Paste a full FFLogs report link or just its code above. Example: <code>VRjJPTzXk9NDQfpr</code></p>
+  </div>
+  {{ end }}
+</div>
+
+{{ template "theme-js" . }}
+</body>
+</html>
