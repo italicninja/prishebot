@@ -127,6 +127,100 @@ func (r *ReportInfo) BestPull() *FightInfo {
 	return best
 }
 
+// ── Pull-progression chart ──────────────────────────────────────────────────
+//
+// The chart is an inline SVG column chart, one column per pull, drawn in a fixed
+// progChartW × progChartH viewBox. Every coordinate is precomputed here as an
+// integer so the template (which has no arithmetic) only interpolates numbers.
+// A column's filled (bottom) portion shows how far the boss was pushed
+// (100 − BossPct, or 100 for a kill); the top portion is the boss HP that
+// remained. Taller filled portion = more progress.
+const (
+	progChartW = 720
+	progChartH = 180
+	progPadTop = 16
+	progPadBot = 16
+	progPlotH  = progChartH - progPadTop - progPadBot // plot area height (148)
+	// ProgAxisY is the y of the chart baseline (bottom of the plot). Exposed for
+	// the template's axis line so it stays in sync with the constants here.
+	ProgAxisY = progPadTop + progPlotH // 164
+)
+
+// ChartDims carries the progression chart's viewBox size and baseline y so the
+// template renders the SVG without hardcoding magic numbers.
+type ChartDims struct{ W, H, AxisY int }
+
+// ProgChartDims returns the fixed geometry of the progression chart viewBox.
+func (r *ReportInfo) ProgChartDims() ChartDims {
+	return ChartDims{W: progChartW, H: progChartH, AxisY: ProgAxisY}
+}
+
+// PullBar is one precomputed column of the progression chart. All fields are
+// integer pixel coordinates within the progChartW × progChartH viewBox.
+type PullBar struct {
+	X, BarW    int    // column x position and width
+	HpY, HpH   int    // "boss HP remaining" block (top, drawn in surface-2)
+	BarY, BarH int    // "boss HP pushed" block (bottom, accent or green)
+	Kill       bool   // true → kill column (green, full height)
+	Label      string // hover tooltip, e.g. "Pull 3 · Wipe · 51.3%"
+}
+
+// progressOf returns how far a pull pushed the boss, 0-100 (100 for a kill).
+// An unknown boss % (<= 0 on a wipe, e.g. an aborted pull) counts as no
+// measurable progress — matching BestPull/BestLineY, which skip the same case —
+// so it renders as a flat empty column rather than a misleading full-height one.
+func progressOf(f FightInfo) float64 {
+	if f.Kill {
+		return 100
+	}
+	if f.BossPct <= 0 {
+		return 0
+	}
+	return max(min(100-f.BossPct, 100), 0)
+}
+
+// HasProgression reports whether the progression chart is worth drawing. A
+// single pull carries no trend, so it is hidden.
+func (r *ReportInfo) HasProgression() bool { return len(r.Fights) >= 2 }
+
+// ProgressionChart precomputes one PullBar per pull for the SVG column chart.
+func (r *ReportInfo) ProgressionChart() []PullBar {
+	n := len(r.Fights)
+	if n == 0 {
+		return nil
+	}
+	colW := max(progChartW/n, 1)
+	gap := colW / 5
+	barW := max(colW-gap, 1)
+
+	out := make([]PullBar, 0, n)
+	for i, f := range r.Fights {
+		barH := int(progressOf(f)/100*float64(progPlotH) + 0.5)
+		out = append(out, PullBar{
+			X:     i*colW + gap/2,
+			BarW:  barW,
+			HpY:   progPadTop,
+			HpH:   progPlotH - barH,
+			BarY:  progPadTop + progPlotH - barH,
+			BarH:  barH,
+			Kill:  f.Kill,
+			Label: fmt.Sprintf("Pull %d · %s", f.ID, f.Outcome()),
+		})
+	}
+	return out
+}
+
+// BestLineY returns the y coordinate for the dashed "best pull" baseline, or 0
+// when there is no meaningful best pull (so the template omits the line).
+func (r *ReportInfo) BestLineY() int {
+	bp := r.BestPull()
+	if bp == nil || (!bp.Kill && bp.BossPct <= 0) {
+		return 0
+	}
+	barH := int(progressOf(*bp)/100*float64(progPlotH) + 0.5)
+	return progPadTop + progPlotH - barH
+}
+
 // FightInfo summarises a single pull/fight within a report.
 type FightInfo struct {
 	ID         int
@@ -190,8 +284,9 @@ func (d DeathInfo) TimeStr() string { return formatDuration(d.TimeMS) }
 
 // CauseCount is a death-cause tally for the "causes of death" breakdown.
 type CauseCount struct {
-	Cause string
-	Count int
+	Cause  string
+	Count  int
+	BarPct int // 0-100, relative to the most common cause (for bar charts)
 }
 
 // PlayerDeaths is a per-player death tally.
@@ -199,6 +294,7 @@ type PlayerDeaths struct {
 	Player string
 	Job    string
 	Count  int
+	BarPct int // 0-100, relative to the player with the most deaths
 }
 
 // DPSEntry is one player's damage contribution.
@@ -208,6 +304,7 @@ type DPSEntry struct {
 	Job    string // pretty-printed
 	Total  int64  // total damage dealt
 	DPS    float64
+	BarPct int // 0-100, relative to the top DPS (for bar charts)
 }
 
 // DPSStr renders DPS as a compact "12.3k" style string.
@@ -596,6 +693,12 @@ func groupByCause(deaths []DeathInfo) []CauseCount {
 		}
 		return out[i].Cause < out[j].Cause
 	})
+	if len(out) > 0 && out[0].Count > 0 {
+		maxC := out[0].Count // sorted desc, so [0] is the largest
+		for i := range out {
+			out[i].BarPct = out[i].Count * 100 / maxC
+		}
+	}
 	return out
 }
 
@@ -617,6 +720,12 @@ func groupByPlayer(deaths []DeathInfo) []PlayerDeaths {
 		}
 		return out[i].Player < out[j].Player
 	})
+	if len(out) > 0 && out[0].Count > 0 {
+		maxP := out[0].Count // sorted desc, so [0] is the largest
+		for i := range out {
+			out[i].BarPct = out[i].Count * 100 / maxP
+		}
+	}
 	return out
 }
 
@@ -656,8 +765,15 @@ func parseDamage(raw json.RawMessage, fallbackMS int64) ([]DPSEntry, int64) {
 		})
 	}
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].DPS > entries[j].DPS })
+	maxDPS := 0.0
+	if len(entries) > 0 {
+		maxDPS = entries[0].DPS // sorted desc, so [0] is the top DPS
+	}
 	for i := range entries {
 		entries[i].Rank = i + 1
+		if maxDPS > 0 {
+			entries[i].BarPct = int(entries[i].DPS/maxDPS*100 + 0.5)
+		}
 	}
 	return entries, durationMS
 }

@@ -41,6 +41,33 @@ func TestPrettyJob(t *testing.T) {
 	}
 }
 
+func TestProgressionChart(t *testing.T) {
+	r := &ReportInfo{Fights: []FightInfo{
+		{ID: 1, Kill: true, BossPct: 0},   // kill -> full-height column
+		{ID: 2, Kill: false, BossPct: 50}, // wipe at 50% -> ~half
+		{ID: 3, Kill: false, BossPct: 0},  // unknown boss% -> empty column (no false "near-clear")
+	}}
+	bars := r.ProgressionChart()
+	if len(bars) != 3 {
+		t.Fatalf("got %d bars, want 3", len(bars))
+	}
+	if bars[0].BarH != progPlotH {
+		t.Errorf("kill column BarH = %d, want full %d", bars[0].BarH, progPlotH)
+	}
+	if bars[1].BarH <= 0 || bars[1].BarH >= progPlotH {
+		t.Errorf("50%% wipe BarH = %d, want strictly between 0 and %d", bars[1].BarH, progPlotH)
+	}
+	if bars[2].BarH != 0 {
+		t.Errorf("unknown-boss%% wipe BarH = %d, want 0 (flat empty column)", bars[2].BarH)
+	}
+	// Every column fills the plot exactly: HpH + BarH == plotH.
+	for i, b := range bars {
+		if b.HpH+b.BarH != progPlotH {
+			t.Errorf("bar %d: HpH(%d)+BarH(%d) != plotH(%d)", i, b.HpH, b.BarH, progPlotH)
+		}
+	}
+}
+
 func TestNormalizePct(t *testing.T) {
 	cases := map[float64]float64{
 		27:   27,

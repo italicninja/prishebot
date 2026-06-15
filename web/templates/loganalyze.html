@@ -7,24 +7,56 @@
   {{ template "theme-init" . }}
   <link rel="stylesheet" href="/static/style.css">
   <style>
+    /* Section + micro labels (mirror the dashboard's quiet, typographic look) */
+    .la-section-label{font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:0 0 0.6rem;}
+    .la-section-label .muted{font-weight:400;text-transform:none;letter-spacing:0;}
+    .la-micro{font-size:0.65rem;font-weight:700;letter-spacing:0.06em;color:var(--muted);text-transform:uppercase;margin-right:0.35rem;}
+    .la-meta{color:var(--muted);font-size:0.82rem;}
+    .la-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);}
+    .la-job{color:var(--muted);font-size:0.8rem;}
+
+    /* Two-column splits + detail table (single-fight death log) */
+    .la-cols{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;}
+    @media (max-width:720px){.la-cols{grid-template-columns:1fr;}}
     .la-table{width:100%;border-collapse:collapse;font-size:0.85rem;}
     .la-table th{text-align:left;color:var(--muted);font-weight:600;text-transform:uppercase;
       letter-spacing:0.04em;font-size:0.7rem;padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);}
     .la-table td{padding:0.45rem 0.6rem;border-bottom:1px solid var(--border);}
     .la-table tr:last-child td{border-bottom:none;}
-    .la-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);}
-    .la-job{color:var(--muted);font-size:0.8rem;}
-    .la-rank{color:var(--muted);font-family:ui-monospace,monospace;width:2rem;}
-    .la-dps{font-weight:600;color:var(--text);}
-    .la-cols{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;}
-    @media (max-width:720px){.la-cols{grid-template-columns:1fr;}}
+
+    /* Fight picker */
     .la-fights{display:flex;flex-direction:column;gap:0.35rem;}
     .la-fight{display:flex;align-items:center;gap:0.6rem;padding:0.5rem 0.7rem;border:1px solid var(--border);
-      border-radius:8px;text-decoration:none;color:var(--text);transition:border-color .12s,background .12s;}
-    .la-fight:hover{border-color:var(--accent,#5865f2);}
-    .la-fight.active{border-color:var(--accent,#5865f2);background:color-mix(in srgb,var(--accent,#5865f2) 12%,transparent);}
+      border-radius:var(--radius);text-decoration:none;color:var(--text);transition:border-color .12s,background .12s;}
+    .la-fight:hover{border-color:var(--accent);text-decoration:none;}
+    .la-fight.active{border-color:var(--accent);background:var(--accent-dim);}
     .la-fight-name{flex:1;font-weight:500;}
-    .la-meta{color:var(--muted);font-size:0.8rem;}
+
+    /* Stat strip */
+    .la-stat-strip{display:flex;gap:2.25rem;flex-wrap:wrap;}
+    .la-stat{display:flex;flex-direction:column;gap:0.15rem;}
+    .la-stat-num{font-size:1.5rem;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1.05;}
+    .la-stat-num.is-kill{color:var(--green);}
+    .la-stat-label{font-size:0.65rem;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);}
+
+    /* Horizontal bar rows (DPS / deaths-by-player / causes) */
+    .la-bars{display:flex;flex-direction:column;gap:3px;}
+    .la-bar-row{position:relative;border-radius:4px;overflow:hidden;background:var(--surface-2);}
+    .la-bar-fill{position:absolute;inset:0 auto 0 0;height:100%;border-radius:4px;}
+    .la-bar-fill--dps{background:color-mix(in srgb,var(--accent) 20%,transparent);}
+    .la-bar-fill--death{background:color-mix(in srgb,var(--red) 16%,transparent);}
+    .la-bar-content{position:relative;z-index:1;display:flex;align-items:center;gap:0.5rem;padding:0.34rem 0.65rem;font-size:0.83rem;}
+    .la-bar-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .la-bar-rank{color:var(--muted);font-variant-numeric:tabular-nums;margin-right:0.2rem;}
+    .la-bar-value{font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;flex-shrink:0;}
+
+    /* Pull-progression column chart (inline SVG, theme-aware via classes) */
+    .la-prog-svg{width:100%;height:auto;display:block;}
+    .la-prog-hp{fill:var(--surface-2);}
+    .la-prog-fill{fill:var(--accent);}
+    .la-prog-fill.is-kill{fill:var(--green);}
+    .la-prog-axis{stroke:var(--border);stroke-width:1;}
+    .la-prog-best{stroke:var(--muted);stroke-width:1;stroke-dasharray:4 3;}
   </style>
 </head>
 <body>
@@ -77,28 +109,58 @@
   {{ with .Report }}
   <!-- ── Report overview ──────────────────────────────────────────────────── -->
   <div class="card" style="margin-bottom:1.25rem;">
-    <div style="display:flex;align-items:baseline;gap:0.75rem;flex-wrap:wrap;">
-      <a href="https://www.fflogs.com/reports/{{ .Code }}" target="_blank" rel="noopener"
-         style="font-size:1.1rem;font-weight:700;color:var(--text);text-decoration:none;">
-        {{ if .Title }}{{ .Title }}{{ else }}FFLogs Report{{ end }} ↗
-      </a>
-    </div>
-    <div class="la-meta" style="margin-top:0.4rem;display:flex;gap:1rem;flex-wrap:wrap;">
-      {{ if .Zone }}<span>📍 {{ .Zone }}</span>{{ end }}
-      {{ if .StartDateStr }}<span>🗓 {{ .StartDateStr }}</span>{{ end }}
-      {{ if .Owner }}<span>👤 {{ .Owner }}</span>{{ end }}
+    <a href="https://www.fflogs.com/reports/{{ .Code }}" target="_blank" rel="noopener"
+       style="font-size:1.1rem;font-weight:700;">
+      {{ if .Title }}{{ .Title }}{{ else }}FFLogs Report{{ end }}
+    </a>
+    <div class="la-meta" style="margin-top:0.5rem;display:flex;gap:1.25rem;flex-wrap:wrap;align-items:baseline;">
+      {{ if .Zone }}<span><span class="la-micro">Zone</span>{{ .Zone }}</span>{{ end }}
+      {{ if .StartDateStr }}<span><span class="la-micro">Date</span>{{ .StartDateStr }}</span>{{ end }}
+      {{ if .Owner }}<span><span class="la-micro">Uploaded by</span>{{ .Owner }}</span>{{ end }}
       <span class="la-mono">{{ .Code }}</span>
     </div>
   </div>
 
+  {{ if eq $.SelectedFight 0 }}
+  <!-- ── Stat strip (whole-report) ────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:1.25rem;">
+    <div class="la-stat-strip">
+      <div class="la-stat"><span class="la-stat-num">{{ len .Fights }}</span><span class="la-stat-label">Pulls</span></div>
+      <div class="la-stat"><span class="la-stat-num{{ if .Kills }} is-kill{{ end }}">{{ .Kills }}</span><span class="la-stat-label">Kills</span></div>
+      <div class="la-stat"><span class="la-stat-num">{{ .Wipes }}</span><span class="la-stat-label">Wipes</span></div>
+      {{ if .BestPull }}<div class="la-stat"><span class="la-stat-num">{{ .BestPull.Outcome }}</span><span class="la-stat-label">Best pull</span></div>{{ end }}
+      {{ with $.Analysis }}<div class="la-stat"><span class="la-stat-num">{{ .DurationStr }}</span><span class="la-stat-label">Combat time</span></div>{{ end }}
+    </div>
+  </div>
+
+  {{ if .HasProgression }}
+  <!-- ── Pull progression chart (whole-report) ────────────────────────────── -->
+  {{ $d := .ProgChartDims }}
+  <div class="la-section-label">Pull progression</div>
+  <div class="card" style="margin-bottom:1.5rem;">
+    <svg class="la-prog-svg" viewBox="0 0 {{ $d.W }} {{ $d.H }}" role="img" aria-label="Boss HP pushed down per pull across the report">
+      <line class="la-prog-axis" x1="0" y1="{{ $d.AxisY }}" x2="{{ $d.W }}" y2="{{ $d.AxisY }}"/>
+      {{ range .ProgressionChart }}
+      <g><title>{{ .Label }}</title>
+        <rect class="la-prog-hp" x="{{ .X }}" y="{{ .HpY }}" width="{{ .BarW }}" height="{{ .HpH }}" rx="1"/>
+        <rect class="la-prog-fill{{ if .Kill }} is-kill{{ end }}" x="{{ .X }}" y="{{ .BarY }}" width="{{ .BarW }}" height="{{ .BarH }}" rx="1"/>
+      </g>
+      {{ end }}
+      {{ if .BestLineY }}<line class="la-prog-best" x1="0" y1="{{ .BestLineY }}" x2="{{ $d.W }}" y2="{{ .BestLineY }}"/>{{ end }}
+    </svg>
+    <p class="la-meta" style="margin:0.65rem 0 0;font-size:0.75rem;">Each column is one pull; the filled part shows how far the boss was pushed — taller is better. The dashed line marks the best pull. Green = clear.</p>
+  </div>
+  {{ end }}
+  {{ end }}
+
   <!-- ── Fight picker ─────────────────────────────────────────────────────── -->
   {{ if .Fights }}
-  <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.6rem;">Fights <span class="muted">· {{ len .Fights }}</span></div>
+  <div class="la-section-label">Fights <span class="muted">· {{ len .Fights }}</span></div>
   <div class="la-fights" style="margin-bottom:1.5rem;">
     {{ $gid := $.Guild.ID }}{{ $code := .Code }}{{ $sel := $.SelectedFight }}
     <a class="la-fight{{ if eq $sel 0 }} active{{ end }}"
        href="/dashboard/server/{{ $gid }}/loganalyze?report={{ $code }}">
-      <span class="la-mono">📊</span>
+      <span class="la-mono">ALL</span>
       <span class="la-fight-name">Whole report summary</span>
       <span class="la-meta">{{ len .Fights }} pulls</span>
     </a>
@@ -108,7 +170,7 @@
       <span class="la-mono">#{{ .ID }}</span>
       <span class="la-fight-name">{{ .Name }}</span>
       {{ if .Kill }}<span class="badge badge-green">Kill</span>{{ else }}<span class="badge badge-closed">{{ .Outcome }}</span>{{ end }}
-      <span class="la-meta">⏱ {{ .Duration }}</span>
+      <span class="la-meta">{{ .Duration }}</span>
     </a>
     {{ end }}
   </div>
@@ -118,42 +180,50 @@
   {{ with .Analysis }}
   <!-- ── Analysis (whole report by default, or a single fight) ────────────── -->
   <div class="card">
-    <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:1rem;">
+    <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:1.1rem;">
       {{ if .WholeReport }}
-        <span style="font-size:1.05rem;font-weight:700;">📊 Whole-report summary</span>
-        <span class="la-meta">{{ .TotalDeaths }} deaths · ⏱ {{ .DurationStr }} combat</span>
+        <span style="font-size:1.05rem;font-weight:700;">Whole-report summary</span>
+        <span class="la-meta">{{ .TotalDeaths }} deaths · {{ .DurationStr }} combat</span>
       {{ else }}
-        <span style="font-size:1.05rem;font-weight:700;">⚔️ {{ .Fight.Name }}</span>
+        <span style="font-size:1.05rem;font-weight:700;">{{ .Fight.Name }}</span>
         {{ if .Fight.Kill }}<span class="badge badge-green">Kill</span>{{ else }}<span class="badge badge-closed">{{ .Fight.Outcome }}</span>{{ end }}
-        <span class="la-meta">⏱ {{ .Fight.Duration }}</span>
+        <span class="la-meta">{{ .Fight.Duration }}</span>
       {{ end }}
     </div>
 
     <!-- Deaths -->
-    <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:0.5rem 0 0.5rem;">💀 Deaths <span class="muted">· {{ .TotalDeaths }}</span></div>
+    <div class="la-section-label">Deaths <span class="muted">· {{ .TotalDeaths }}</span></div>
     {{ if not .Deaths }}
-      <p class="la-meta" style="margin:0 0 1rem;">No deaths — clean! 🎉</p>
+      <p class="la-meta" style="margin:0 0 1rem;">No deaths recorded.</p>
     {{ else if .WholeReport }}
       <div class="la-cols">
         <div>
-          <div class="la-meta" style="margin-bottom:0.4rem;font-weight:600;">By player</div>
-          <table class="la-table">
-            <tbody>
-              {{ range .DeathsByPlayer }}
-              <tr><td class="la-mono" style="width:3rem;">{{ .Count }}×</td><td>{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</td></tr>
-              {{ end }}
-            </tbody>
-          </table>
+          <div class="la-meta" style="margin-bottom:0.45rem;font-weight:600;">By player</div>
+          <div class="la-bars">
+            {{ range .DeathsByPlayer }}
+            <div class="la-bar-row">
+              <div class="la-bar-fill la-bar-fill--death" style="width:{{ .BarPct }}%"></div>
+              <div class="la-bar-content">
+                <span class="la-bar-name">{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</span>
+                <span class="la-bar-value">{{ .Count }}</span>
+              </div>
+            </div>
+            {{ end }}
+          </div>
         </div>
         <div>
-          <div class="la-meta" style="margin-bottom:0.4rem;font-weight:600;">Causes of death</div>
-          <table class="la-table">
-            <tbody>
-              {{ range .DeathsByCause }}
-              <tr><td class="la-mono" style="width:3rem;">{{ .Count }}×</td><td>{{ .Cause }}</td></tr>
-              {{ end }}
-            </tbody>
-          </table>
+          <div class="la-meta" style="margin-bottom:0.45rem;font-weight:600;">Causes of death</div>
+          <div class="la-bars">
+            {{ range .DeathsByCause }}
+            <div class="la-bar-row">
+              <div class="la-bar-fill la-bar-fill--death" style="width:{{ .BarPct }}%"></div>
+              <div class="la-bar-content">
+                <span class="la-bar-name">{{ .Cause }}</span>
+                <span class="la-bar-value">{{ .Count }}</span>
+              </div>
+            </div>
+            {{ end }}
+          </div>
         </div>
       </div>
     {{ else }}
@@ -173,44 +243,45 @@
           </table>
         </div>
         <div>
-          <div class="la-meta" style="margin-bottom:0.4rem;font-weight:600;">Causes of death</div>
-          <table class="la-table">
-            <tbody>
-              {{ range .DeathsByCause }}
-              <tr><td class="la-mono" style="width:3rem;">{{ .Count }}×</td><td>{{ .Cause }}</td></tr>
-              {{ end }}
-            </tbody>
-          </table>
+          <div class="la-meta" style="margin-bottom:0.45rem;font-weight:600;">Causes of death</div>
+          <div class="la-bars">
+            {{ range .DeathsByCause }}
+            <div class="la-bar-row">
+              <div class="la-bar-fill la-bar-fill--death" style="width:{{ .BarPct }}%"></div>
+              <div class="la-bar-content">
+                <span class="la-bar-name">{{ .Cause }}</span>
+                <span class="la-bar-value">{{ .Count }}</span>
+              </div>
+            </div>
+            {{ end }}
+          </div>
         </div>
       </div>
     {{ end }}
 
     <!-- DPS -->
-    <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:1.25rem 0 0.5rem;">🔥 DPS ranking{{ if .WholeReport }} <span class="muted">· whole report</span>{{ end }}</div>
+    <div class="la-section-label" style="margin-top:1.5rem;">DPS ranking{{ if .WholeReport }} <span class="muted">· whole report</span>{{ end }}</div>
     {{ if not .DPS }}
       <p class="la-meta" style="margin:0;">No damage data available.</p>
     {{ else }}
-      <table class="la-table">
-        <thead><tr><th>#</th><th>Player</th><th>DPS</th><th>Total damage</th></tr></thead>
-        <tbody>
-          {{ range .DPS }}
-          <tr>
-            <td class="la-rank">{{ .Rank }}</td>
-            <td>{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</td>
-            <td class="la-dps">{{ .DPSStr }}</td>
-            <td class="la-mono">{{ .Total }}</td>
-          </tr>
-          {{ end }}
-        </tbody>
-      </table>
-      <p class="la-meta" style="margin:0.6rem 0 0;font-size:0.75rem;">DPS = total damage over the {{ if .WholeReport }}combined active combat{{ else }}encounter{{ end }} duration.</p>
+      <div class="la-bars">
+        {{ range .DPS }}
+        <div class="la-bar-row">
+          <div class="la-bar-fill la-bar-fill--dps" style="width:{{ .BarPct }}%"></div>
+          <div class="la-bar-content">
+            <span class="la-bar-name"><span class="la-bar-rank">{{ .Rank }}</span>{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</span>
+            <span class="la-bar-value">{{ .DPSStr }}</span>
+          </div>
+        </div>
+        {{ end }}
+      </div>
+      <p class="la-meta" style="margin:0.65rem 0 0;font-size:0.75rem;">DPS = total damage over the {{ if .WholeReport }}combined active combat{{ else }}encounter{{ end }} duration.</p>
     {{ end }}
   </div>
   {{ end }}
 
   {{ if and .Configured (not .RawInput) }}
   <div class="empty" style="padding:2.5rem 1rem;">
-    <div class="empty-icon">📊</div>
     <h2>Analyze a log</h2>
     <p>Paste a full FFLogs report link or just its code above. Example: <code>VRjJPTzXk9NDQfpr</code></p>
   </div>
