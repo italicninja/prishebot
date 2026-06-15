@@ -96,6 +96,8 @@ func TestLogAnalyzeRenderWholeReport(t *testing.T) {
 
 	for _, want := range []string{
 		"Whole-report summary",  // analysis header
+		`class="page la-page"`,  // wide full-width shell
+		`class="la-grid"`,       // metric cards tiled in the dashboard grid
 		`class="la-stat-strip"`, // stat strip element present
 		`class="la-prog-svg"`,   // progression chart element present (>=2 fights)
 		"width:100%",            // top bar fully filled (BarPct=100)

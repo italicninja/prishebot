@@ -15,9 +15,26 @@
     .la-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);}
     .la-job{color:var(--muted);font-size:0.8rem;}
 
-    /* Two-column splits + detail table (single-fight death log) */
-    .la-cols{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;}
-    @media (max-width:720px){.la-cols{grid-template-columns:1fr;}}
+    /* ── Full-width dashboard layout ──────────────────────────────────────────
+       Widen this page's shell beyond the default .page (960px) to a fluid but
+       bounded width — full-screen *feel* without destroying line length on huge
+       monitors — then tile the metric cards with the repo's native auto-fit grid
+       idiom (same as .server-grid/.features-grid). No framework, no media query:
+       the grid collapses to one column on phones via min(100%, …). */
+    .page.la-page{max-width:clamp(960px, 92vw, 1600px);}
+    .la-grid{display:grid;gap:clamp(0.75rem,2vw,1.5rem);align-items:start;margin-bottom:1.25rem;
+      grid-template-columns:repeat(auto-fit, minmax(min(100%, 22rem), 1fr));}
+    .la-grid > .card{margin:0;}
+    .la-span-all{grid-column:1 / -1;}
+    .la-analysis-head{display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin:0 0 1rem;}
+    .la-analysis-title{font-size:1.05rem;font-weight:700;}
+    /* Per-pull list tiles 2-up on wide screens, 1 column otherwise. */
+    .la-pull-grid{display:grid;gap:0.5rem;align-items:start;
+      grid-template-columns:repeat(auto-fit, minmax(min(100%, 38rem), 1fr));}
+    /* Keep data tables readable when a card gets wide. */
+    .la-table-wrap{overflow-x:auto;}
+
+    /* Detail table (death logs) */
     .la-table{width:100%;border-collapse:collapse;font-size:0.85rem;}
     .la-table th{text-align:left;color:var(--muted);font-weight:600;text-transform:uppercase;
       letter-spacing:0.04em;font-size:0.7rem;padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);}
@@ -77,7 +94,7 @@
 <body>
 {{ template "auth-nav" . }}
 
-<div class="page">
+<div class="page la-page">
   <div class="crumb">
     <a href="/dashboard" class="btn btn-ghost btn-sm">← Servers</a>
     <a href="/dashboard/server/{{ .Guild.ID }}" class="btn btn-ghost btn-sm">{{ .Guild.Name }}</a>
@@ -194,56 +211,60 @@
 
   {{ with .Analysis }}
   <!-- ── Analysis (whole report by default, or a single fight) ────────────── -->
-  <div class="card">
-    <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:1.1rem;">
-      {{ if .WholeReport }}
-        <span style="font-size:1.05rem;font-weight:700;">Whole-report summary</span>
-        <span class="la-meta">{{ .TotalDeaths }} deaths · {{ .DurationStr }} combat</span>
-      {{ else }}
-        <span style="font-size:1.05rem;font-weight:700;">{{ .Fight.Name }}</span>
-        {{ if .Fight.Kill }}<span class="badge badge-green">Kill</span>{{ else }}<span class="badge badge-closed">{{ .Fight.Outcome }}</span>{{ end }}
-        <span class="la-meta">{{ .Fight.Duration }}</span>
-      {{ end }}
-    </div>
+  <div class="la-analysis-head">
+    {{ if .WholeReport }}
+      <span class="la-analysis-title">Whole-report summary</span>
+      <span class="la-meta">{{ .TotalDeaths }} deaths · {{ .DurationStr }} combat</span>
+    {{ else }}
+      <span class="la-analysis-title">{{ .Fight.Name }}</span>
+      {{ if .Fight.Kill }}<span class="badge badge-green">Kill</span>{{ else }}<span class="badge badge-closed">{{ .Fight.Outcome }}</span>{{ end }}
+      <span class="la-meta">{{ .Fight.Duration }}</span>
+    {{ end }}
+  </div>
 
-    <!-- Deaths -->
-    <div class="la-section-label">Deaths <span class="muted">· {{ .TotalDeaths }}</span></div>
-    {{ if not .Deaths }}
-      <p class="la-meta" style="margin:0 0 1rem;">No deaths recorded.</p>
-    {{ else if .WholeReport }}
-      <div class="la-cols">
-        <div>
-          <div class="la-meta" style="margin-bottom:0.45rem;font-weight:600;">By player</div>
-          <div class="la-bars">
-            {{ range .DeathsByPlayer }}
-            <div class="la-bar-row">
-              <div class="la-bar-fill la-bar-fill--death" style="width:{{ .BarPct }}%"></div>
-              <div class="la-bar-content">
-                <span class="la-bar-name">{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</span>
-                <span class="la-bar-value">{{ .Count }}</span>
-              </div>
+  <!-- Metric tiles: auto-fit grid — fills the width on desktop, 1 column on mobile -->
+  <div class="la-grid">
+    {{ if .WholeReport }}
+      {{ if .Deaths }}
+      <div class="card">
+        <div class="la-section-label">Deaths by player <span class="muted">· {{ .TotalDeaths }}</span></div>
+        <div class="la-bars">
+          {{ range .DeathsByPlayer }}
+          <div class="la-bar-row">
+            <div class="la-bar-fill la-bar-fill--death" style="width:{{ .BarPct }}%"></div>
+            <div class="la-bar-content">
+              <span class="la-bar-name">{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</span>
+              <span class="la-bar-value">{{ .Count }}</span>
             </div>
-            {{ end }}
           </div>
-        </div>
-        <div>
-          <div class="la-meta" style="margin-bottom:0.45rem;font-weight:600;">Causes of death</div>
-          <div class="la-bars">
-            {{ range .DeathsByCause }}
-            <div class="la-bar-row">
-              <div class="la-bar-fill la-bar-fill--death" style="width:{{ .BarPct }}%"></div>
-              <div class="la-bar-content">
-                <span class="la-bar-name">{{ .Cause }}</span>
-                <span class="la-bar-value">{{ .Count }}</span>
-              </div>
-            </div>
-            {{ end }}
-          </div>
+          {{ end }}
         </div>
       </div>
+      <div class="card">
+        <div class="la-section-label">Causes of death</div>
+        <div class="la-bars">
+          {{ range .DeathsByCause }}
+          <div class="la-bar-row">
+            <div class="la-bar-fill la-bar-fill--death" style="width:{{ .BarPct }}%"></div>
+            <div class="la-bar-content">
+              <span class="la-bar-name">{{ .Cause }}</span>
+              <span class="la-bar-value">{{ .Count }}</span>
+            </div>
+          </div>
+          {{ end }}
+        </div>
+      </div>
+      {{ else }}
+      <div class="card la-span-all">
+        <div class="la-section-label">Deaths <span class="muted">· 0</span></div>
+        <p class="la-meta" style="margin:0;">No deaths recorded.</p>
+      </div>
+      {{ end }}
     {{ else }}
-      <div class="la-cols">
-        <div>
+      <div class="card la-span-all">
+        <div class="la-section-label">Deaths <span class="muted">· {{ .TotalDeaths }}</span></div>
+        {{ if .Deaths }}
+        <div class="la-table-wrap">
           <table class="la-table">
             <thead><tr><th>Time</th><th>Player</th><th>Cause</th></tr></thead>
             <tbody>
@@ -257,45 +278,49 @@
             </tbody>
           </table>
         </div>
-        <div>
-          <div class="la-meta" style="margin-bottom:0.45rem;font-weight:600;">Causes of death</div>
-          <div class="la-bars">
-            {{ range .DeathsByCause }}
-            <div class="la-bar-row">
-              <div class="la-bar-fill la-bar-fill--death" style="width:{{ .BarPct }}%"></div>
-              <div class="la-bar-content">
-                <span class="la-bar-name">{{ .Cause }}</span>
-                <span class="la-bar-value">{{ .Count }}</span>
-              </div>
-            </div>
-            {{ end }}
-          </div>
-        </div>
+        {{ else }}
+        <p class="la-meta" style="margin:0;">No deaths recorded.</p>
+        {{ end }}
       </div>
-    {{ end }}
-
-    <!-- Damage Down -->
-    {{ if .DamageDowns }}
-    <div class="la-section-label" style="margin-top:1.5rem;">Damage Down <span class="muted">· {{ .TotalDowns }} total</span></div>
-    <div class="la-bars">
-      {{ range .DamageDowns }}
-      <div class="la-bar-row">
-        <div class="la-bar-fill la-bar-fill--down" style="width:{{ .BarPct }}%"></div>
-        <div class="la-bar-content">
-          <span class="la-bar-name">{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</span>
-          <span class="la-bar-value">{{ .Count }}</span>
+      {{ if .DeathsByCause }}
+      <div class="card">
+        <div class="la-section-label">Causes of death</div>
+        <div class="la-bars">
+          {{ range .DeathsByCause }}
+          <div class="la-bar-row">
+            <div class="la-bar-fill la-bar-fill--death" style="width:{{ .BarPct }}%"></div>
+            <div class="la-bar-content">
+              <span class="la-bar-name">{{ .Cause }}</span>
+              <span class="la-bar-value">{{ .Count }}</span>
+            </div>
+          </div>
+          {{ end }}
         </div>
       </div>
       {{ end }}
-    </div>
-    <p class="la-meta" style="margin:0.5rem 0 0;font-size:0.75rem;">Damage Down = the mechanic-failure penalty (got hit by something avoidable). Higher = more mechanics flubbed.</p>
     {{ end }}
 
-    <!-- DPS -->
-    <div class="la-section-label" style="margin-top:1.5rem;">DPS ranking{{ if .WholeReport }} <span class="muted">· whole report</span>{{ end }}</div>
-    {{ if not .DPS }}
-      <p class="la-meta" style="margin:0;">No damage data available.</p>
-    {{ else }}
+    {{ if .DamageDowns }}
+    <div class="card">
+      <div class="la-section-label">Damage Down <span class="muted">· {{ .TotalDowns }} total</span></div>
+      <div class="la-bars">
+        {{ range .DamageDowns }}
+        <div class="la-bar-row">
+          <div class="la-bar-fill la-bar-fill--down" style="width:{{ .BarPct }}%"></div>
+          <div class="la-bar-content">
+            <span class="la-bar-name">{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</span>
+            <span class="la-bar-value">{{ .Count }}</span>
+          </div>
+        </div>
+        {{ end }}
+      </div>
+      <p class="la-meta" style="margin:0.5rem 0 0;font-size:0.75rem;">Damage Down = the mechanic-failure penalty (got hit by something avoidable). Higher = more mechanics flubbed.</p>
+    </div>
+    {{ end }}
+
+    {{ if .DPS }}
+    <div class="card">
+      <div class="la-section-label">DPS ranking{{ if .WholeReport }} <span class="muted">· whole report</span>{{ end }}</div>
       <div class="la-bars">
         {{ range .DPS }}
         <div class="la-bar-row">
@@ -308,13 +333,19 @@
         {{ end }}
       </div>
       <p class="la-meta" style="margin:0.65rem 0 0;font-size:0.75rem;">DPS = total damage over the {{ if .WholeReport }}combined active combat{{ else }}encounter{{ end }} duration.</p>
+    </div>
+    {{ else }}
+    <div class="card">
+      <div class="la-section-label">DPS ranking</div>
+      <p class="la-meta" style="margin:0;">No damage data available.</p>
+    </div>
     {{ end }}
   </div>
 
   {{ if and .WholeReport .DeathsByPull }}
   <!-- ── Deaths by pull (whole-report) ────────────────────────────────────── -->
-  <div class="la-section-label" style="margin-top:1.5rem;">Deaths by pull <span class="muted">· how each pull went wrong</span></div>
-  <div>
+  <div class="la-section-label" style="margin-top:0.25rem;">Deaths by pull <span class="muted">· how each pull went wrong</span></div>
+  <div class="la-pull-grid">
     {{ range .DeathsByPull }}
     <details class="la-pull">
       <summary>
@@ -325,18 +356,20 @@
       </summary>
       <div class="la-pull-body">
         {{ if .Deaths }}
-        <table class="la-table">
-          <thead><tr><th>Time</th><th>Player</th><th>Cause</th></tr></thead>
-          <tbody>
-            {{ range .Deaths }}
-            <tr>
-              <td class="la-mono">{{ .TimeStr }}</td>
-              <td>{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</td>
-              <td>{{ .Cause }}</td>
-            </tr>
-            {{ end }}
-          </tbody>
-        </table>
+        <div class="la-table-wrap">
+          <table class="la-table">
+            <thead><tr><th>Time</th><th>Player</th><th>Cause</th></tr></thead>
+            <tbody>
+              {{ range .Deaths }}
+              <tr>
+                <td class="la-mono">{{ .TimeStr }}</td>
+                <td>{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</td>
+                <td>{{ .Cause }}</td>
+              </tr>
+              {{ end }}
+            </tbody>
+          </table>
+        </div>
         {{ else }}
         <p class="la-meta" style="margin:0;">No deaths this pull.</p>
         {{ end }}
