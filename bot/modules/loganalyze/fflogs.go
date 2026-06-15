@@ -73,6 +73,16 @@ type ReportInfo struct {
 	Zone      string
 	StartTime int64 // ms epoch (UTC) of report start
 	Fights    []FightInfo
+
+	// actors maps an actor id to its player name/job, used to resolve targetIDs
+	// in debuff events (e.g. who got Damage Down). Populated by FetchReport.
+	actors map[int]actorInfo
+}
+
+// actorInfo is a player's display name and pretty-printed job.
+type actorInfo struct {
+	Name string
+	Job  string
 }
 
 // StartUnix returns the report start as a Unix second timestamp (for Discord
@@ -259,15 +269,63 @@ type Analysis struct {
 	DurationMS  int64      // analysed combat time (fight length, or summed active time)
 
 	TotalDeaths    int
-	Deaths         []DeathInfo    // chronological
-	DeathsByCause  []CauseCount   // grouped by killing mechanic, most common first
-	DeathsByPlayer []PlayerDeaths // grouped by player, most deaths first
+	Deaths         []DeathInfo     // chronological
+	DeathsByCause  []CauseCount    // grouped by killing mechanic, most common first
+	DeathsByPlayer []PlayerDeaths  // grouped by player, most deaths first
+	DeathsByPull   []PullBreakdown // per-pull deaths + Damage Downs (whole-report only)
+
+	TotalDowns  int         // total Damage Down applications in scope
+	DamageDowns []DownEntry // per-player Damage Down tally, most first
 
 	DPS []DPSEntry // highest DPS first
 }
 
 // DurationStr renders the analysed combat time as "M:SS".
 func (a *Analysis) DurationStr() string { return formatDuration(a.DurationMS) }
+
+// DownEntry is a per-player Damage Down tally (mechanic-failure penalty).
+type DownEntry struct {
+	Player string
+	Job    string
+	Count  int
+	BarPct int // 0-100, relative to the player with the most Damage Downs
+}
+
+// DownInPull names one player's Damage Downs within a single pull.
+type DownInPull struct {
+	Player string
+	Count  int
+}
+
+// PullBreakdown groups one pull's deaths and Damage Downs for the per-pull view.
+type PullBreakdown struct {
+	FightID   int
+	FightName string
+	Outcome   string // "Kill" / "Wipe · NN%"
+	Kill      bool
+	Deaths    []DeathInfo
+	Downs     []DownInPull
+}
+
+// downTotal sums Damage Down applications in this pull (across players).
+func (p PullBreakdown) downTotal() int {
+	n := 0
+	for _, d := range p.Downs {
+		n += d.Count
+	}
+	return n
+}
+
+// Summary is the pull's one-line death/Damage-Down count for the disclosure
+// header, with correct pluralization and the true application total (not the
+// number of players, which the chips already break down).
+func (p PullBreakdown) Summary() string {
+	s := fmt.Sprintf("%d %s", len(p.Deaths), pluralize(len(p.Deaths), "death", "deaths"))
+	if dt := p.downTotal(); dt > 0 {
+		s += fmt.Sprintf(" · %d× Damage Down", dt)
+	}
+	return s
+}
 
 // DeathInfo is one player death.
 type DeathInfo struct {
@@ -428,6 +486,7 @@ query ($code: String!) {
       startTime
       owner { name }
       zone { name }
+      masterData { actors(type: "Player") { id name subType } }
       fights {
         id
         name
@@ -455,6 +514,120 @@ query ($code: String!, $fightIDs: [Int]) {
   }
 }`
 
+// damageDownAbilityID is the FFXIV "Damage Down" status (the mechanic-failure
+// penalty), resolved from masterData on the test report.
+const damageDownAbilityID = 1002911
+
+// debuffEventsQuery pages through debuff events for one ability across the given
+// fights. The events stream is paginated via nextPageTimestamp.
+const debuffEventsQuery = `
+query ($code: String!, $fightIDs: [Int], $abilityID: Float, $start: Float) {
+  reportData {
+    report(code: $code) {
+      events(dataType: Debuffs, fightIDs: $fightIDs, abilityID: $abilityID, startTime: $start, limit: 1000) {
+        data
+        nextPageTimestamp
+      }
+    }
+  }
+}`
+
+// downEvent is the subset of a debuff event we use to attribute Damage Down.
+type downEvent struct {
+	Type     string `json:"type"` // "applydebuff" / "removedebuff" / ...
+	TargetID int    `json:"targetID"`
+	Fight    int    `json:"fight"`
+}
+
+// fetchDamageDowns pages through all Damage Down debuff events for the given
+// fights and returns them (apply and remove; callers filter to applydebuff).
+func (c *Client) fetchDamageDowns(ctx context.Context, code string, fightIDs []int) ([]downEvent, error) {
+	var out []downEvent
+	var start float64
+	for range 25 { // hard cap guards against a runaway cursor
+		var resp struct {
+			ReportData struct {
+				Report struct {
+					Events struct {
+						Data              []downEvent `json:"data"`
+						NextPageTimestamp *float64    `json:"nextPageTimestamp"`
+					} `json:"events"`
+				} `json:"report"`
+			} `json:"reportData"`
+		}
+		vars := map[string]any{"code": code, "fightIDs": fightIDs, "abilityID": damageDownAbilityID, "start": start}
+		if err := c.query(ctx, debuffEventsQuery, vars, &resp); err != nil {
+			return nil, err
+		}
+		out = append(out, resp.ReportData.Report.Events.Data...)
+		np := resp.ReportData.Report.Events.NextPageTimestamp
+		if np == nil || *np <= start {
+			break
+		}
+		start = *np
+	}
+	return out, nil
+}
+
+// buildDownEntries turns a per-player Damage Down tally into a sorted ranking
+// with bar percentages relative to the worst offender.
+func buildDownEntries(countByPlayer map[string]int, jobByPlayer map[string]string) []DownEntry {
+	out := make([]DownEntry, 0, len(countByPlayer))
+	for name, cnt := range countByPlayer {
+		out = append(out, DownEntry{Player: name, Job: jobByPlayer[name], Count: cnt})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Player < out[j].Player
+	})
+	if len(out) > 0 && out[0].Count > 0 {
+		maxC := out[0].Count
+		for i := range out {
+			out[i].BarPct = out[i].Count * 100 / maxC
+		}
+	}
+	return out
+}
+
+// buildPullBreakdowns groups deaths and Damage Downs by pull, in fight order,
+// keeping only pulls where something went wrong (a death or a Damage Down).
+func buildPullBreakdowns(fights []FightInfo, deaths []DeathInfo, downByFight map[int]map[string]int) []PullBreakdown {
+	deathsByFight := map[int][]DeathInfo{}
+	for _, d := range deaths { // deaths are already ordered by fight then time
+		deathsByFight[d.FightID] = append(deathsByFight[d.FightID], d)
+	}
+	var out []PullBreakdown
+	for _, f := range fights {
+		ds := deathsByFight[f.ID]
+		downs := downByFight[f.ID]
+		if len(ds) == 0 && len(downs) == 0 {
+			continue
+		}
+		pb := PullBreakdown{FightID: f.ID, FightName: f.Name, Outcome: f.Outcome(), Kill: f.Kill, Deaths: ds}
+		for name, cnt := range downs {
+			pb.Downs = append(pb.Downs, DownInPull{Player: name, Count: cnt})
+		}
+		sort.SliceStable(pb.Downs, func(i, j int) bool {
+			if pb.Downs[i].Count != pb.Downs[j].Count {
+				return pb.Downs[i].Count > pb.Downs[j].Count
+			}
+			return pb.Downs[i].Player < pb.Downs[j].Player
+		})
+		out = append(out, pb)
+	}
+	return out
+}
+
+// pluralize returns one or many depending on n.
+func pluralize(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
 // FetchReport returns the report overview (title, zone, owner, fight list).
 func (c *Client) FetchReport(ctx context.Context, code string) (*ReportInfo, error) {
 	var resp struct {
@@ -468,6 +641,13 @@ func (c *Client) FetchReport(ctx context.Context, code string) (*ReportInfo, err
 				Zone *struct {
 					Name string `json:"name"`
 				} `json:"zone"`
+				MasterData *struct {
+					Actors []struct {
+						ID      int    `json:"id"`
+						Name    string `json:"name"`
+						SubType string `json:"subType"`
+					} `json:"actors"`
+				} `json:"masterData"`
 				Fights []struct {
 					ID             int     `json:"id"`
 					Name           string  `json:"name"`
@@ -498,6 +678,12 @@ func (c *Client) FetchReport(ctx context.Context, code string) (*ReportInfo, err
 	}
 	if r.Zone != nil {
 		info.Zone = r.Zone.Name
+	}
+	if r.MasterData != nil {
+		info.actors = make(map[int]actorInfo, len(r.MasterData.Actors))
+		for _, a := range r.MasterData.Actors {
+			info.actors[a.ID] = actorInfo{Name: a.Name, Job: prettyJob(a.SubType)}
+		}
 	}
 	for _, f := range r.Fights {
 		fi := FightInfo{
@@ -541,7 +727,7 @@ func (c *Client) Analyze(ctx context.Context, code string, fightID int) (*Report
 	}
 
 	a := &Analysis{}
-	vars := map[string]any{"code": code}
+	var scopedIDs []int
 	if fightID > 0 {
 		f := findFight(info.Fights, fightID)
 		if f == nil {
@@ -550,18 +736,18 @@ func (c *Client) Analyze(ctx context.Context, code string, fightID int) (*Report
 		a.Fight = f
 		a.Scope = f.Name
 		a.DurationMS = f.DurationMS()
-		vars["fightIDs"] = []int{f.ID}
+		scopedIDs = []int{f.ID}
 	} else {
 		a.WholeReport = true
 		a.Scope = "Whole report"
 		// The table query rejects an absent fight list, so pass every fight id
 		// explicitly to cover the whole report.
-		ids := make([]int, 0, len(info.Fights))
+		scopedIDs = make([]int, 0, len(info.Fights))
 		for _, f := range info.Fights {
-			ids = append(ids, f.ID)
+			scopedIDs = append(scopedIDs, f.ID)
 		}
-		vars["fightIDs"] = ids
 	}
+	vars := map[string]any{"code": code, "fightIDs": scopedIDs}
 
 	var resp struct {
 		ReportData struct {
@@ -584,6 +770,42 @@ func (c *Client) Analyze(ctx context.Context, code string, fightID int) (*Report
 	a.DPS = dps
 	if a.WholeReport && totalTime > 0 {
 		a.DurationMS = totalTime // summed active combat time across pulls
+	}
+
+	// Damage Down (mechanic-failure penalty). Best-effort: a failure here leaves
+	// the deaths/DPS analysis intact rather than failing the whole request.
+	downByFight := map[int]map[string]int{}
+	if downs, derr := c.fetchDamageDowns(ctx, code, scopedIDs); derr == nil {
+		downByPlayer := map[string]int{}
+		jobByPlayer := map[string]string{}
+		for _, e := range downs {
+			// Count each application. "refreshdebuff" is a re-hit while the debuff
+			// is still active, so it's a genuine extra occurrence.
+			if e.Type != "applydebuff" && e.Type != "refreshdebuff" {
+				continue
+			}
+			// Only attribute Damage Down to players. A target missing from the
+			// player actor map is a pet/NPC (Damage Down on those isn't a player
+			// mistake), so skip it.
+			ai, ok := info.actors[e.TargetID]
+			if !ok {
+				continue
+			}
+			downByPlayer[ai.Name]++
+			jobByPlayer[ai.Name] = ai.Job
+			if downByFight[e.Fight] == nil {
+				downByFight[e.Fight] = map[string]int{}
+			}
+			downByFight[e.Fight][ai.Name]++
+			a.TotalDowns++
+		}
+		a.DamageDowns = buildDownEntries(downByPlayer, jobByPlayer)
+	}
+	// The per-pull breakdown is whole-report only and does NOT depend on Damage
+	// Down data, so build it regardless of whether the downs fetch succeeded
+	// (downByFight is empty on failure → pulls just show deaths).
+	if a.WholeReport {
+		a.DeathsByPull = buildPullBreakdowns(info.Fights, a.Deaths, downByFight)
 	}
 	return info, a, nil
 }

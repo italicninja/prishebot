@@ -57,6 +57,21 @@
     .la-prog-fill.is-kill{fill:var(--green);}
     .la-prog-axis{stroke:var(--border);stroke-width:1;}
     .la-prog-best{stroke:var(--muted);stroke-width:1;stroke-dasharray:4 3;}
+
+    /* Damage Down bar (mechanic-failure penalty) — reddish-purple wash kept at
+       the same faint ~22% strength as the other bar fills. */
+    .la-bar-fill--down{background:color-mix(in srgb, color-mix(in srgb,var(--red) 78%,var(--accent) 22%) 22%, transparent);}
+
+    /* Deaths-by-pull disclosure list */
+    .la-pull{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.4rem;overflow:hidden;}
+    .la-pull > summary{display:flex;align-items:center;gap:0.6rem;padding:0.55rem 0.75rem;cursor:pointer;list-style:none;font-size:0.85rem;user-select:none;}
+    .la-pull > summary::-webkit-details-marker{display:none;}
+    .la-pull > summary::before{content:"\25B8";color:var(--muted);font-size:0.7rem;transition:transform .15s;}
+    .la-pull[open] > summary::before{transform:rotate(90deg);}
+    .la-pull-name{flex:1;font-weight:500;}
+    .la-pull-body{padding:0.4rem 0.75rem 0.75rem;border-top:1px solid var(--border);}
+    .la-pull-downs{margin-top:0.65rem;display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;}
+    .la-down-chip{font-size:0.78rem;background:color-mix(in srgb,var(--red) 14%,transparent);color:var(--text);border-radius:999px;padding:0.1rem 0.55rem;}
   </style>
 </head>
 <body>
@@ -259,6 +274,23 @@
       </div>
     {{ end }}
 
+    <!-- Damage Down -->
+    {{ if .DamageDowns }}
+    <div class="la-section-label" style="margin-top:1.5rem;">Damage Down <span class="muted">· {{ .TotalDowns }} total</span></div>
+    <div class="la-bars">
+      {{ range .DamageDowns }}
+      <div class="la-bar-row">
+        <div class="la-bar-fill la-bar-fill--down" style="width:{{ .BarPct }}%"></div>
+        <div class="la-bar-content">
+          <span class="la-bar-name">{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</span>
+          <span class="la-bar-value">{{ .Count }}</span>
+        </div>
+      </div>
+      {{ end }}
+    </div>
+    <p class="la-meta" style="margin:0.5rem 0 0;font-size:0.75rem;">Damage Down = the mechanic-failure penalty (got hit by something avoidable). Higher = more mechanics flubbed.</p>
+    {{ end }}
+
     <!-- DPS -->
     <div class="la-section-label" style="margin-top:1.5rem;">DPS ranking{{ if .WholeReport }} <span class="muted">· whole report</span>{{ end }}</div>
     {{ if not .DPS }}
@@ -278,6 +310,47 @@
       <p class="la-meta" style="margin:0.65rem 0 0;font-size:0.75rem;">DPS = total damage over the {{ if .WholeReport }}combined active combat{{ else }}encounter{{ end }} duration.</p>
     {{ end }}
   </div>
+
+  {{ if and .WholeReport .DeathsByPull }}
+  <!-- ── Deaths by pull (whole-report) ────────────────────────────────────── -->
+  <div class="la-section-label" style="margin-top:1.5rem;">Deaths by pull <span class="muted">· how each pull went wrong</span></div>
+  <div>
+    {{ range .DeathsByPull }}
+    <details class="la-pull">
+      <summary>
+        <span class="la-mono">#{{ .FightID }}</span>
+        <span class="la-pull-name">{{ .FightName }}</span>
+        {{ if .Kill }}<span class="badge badge-green">Kill</span>{{ else }}<span class="badge badge-closed">{{ .Outcome }}</span>{{ end }}
+        <span class="la-meta">{{ .Summary }}</span>
+      </summary>
+      <div class="la-pull-body">
+        {{ if .Deaths }}
+        <table class="la-table">
+          <thead><tr><th>Time</th><th>Player</th><th>Cause</th></tr></thead>
+          <tbody>
+            {{ range .Deaths }}
+            <tr>
+              <td class="la-mono">{{ .TimeStr }}</td>
+              <td>{{ .Player }}{{ if .Job }} <span class="la-job">{{ .Job }}</span>{{ end }}</td>
+              <td>{{ .Cause }}</td>
+            </tr>
+            {{ end }}
+          </tbody>
+        </table>
+        {{ else }}
+        <p class="la-meta" style="margin:0;">No deaths this pull.</p>
+        {{ end }}
+        {{ if .Downs }}
+        <div class="la-pull-downs">
+          <span class="la-micro">Damage Down</span>
+          {{ range .Downs }}<span class="la-down-chip">{{ .Player }}{{ if gt .Count 1 }} ×{{ .Count }}{{ end }}</span>{{ end }}
+        </div>
+        {{ end }}
+      </div>
+    </details>
+    {{ end }}
+  </div>
+  {{ end }}
   {{ end }}
 
   {{ if and .Configured (not .RawInput) }}

@@ -202,6 +202,15 @@ func (m *Module) buildEmbed(info *ReportInfo, a *Analysis) *discordgo.MessageEmb
 		})
 	}
 
+	// ── Damage Down ───────────────────────────────────────────────────────────
+	if len(a.DamageDowns) > 0 {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   fmt.Sprintf("📉 Damage Down (%d)", a.TotalDowns),
+			Value:  downLines(a.DamageDowns),
+			Inline: true,
+		})
+	}
+
 	// ── DPS ──────────────────────────────────────────────────────────────────
 	if len(a.DPS) > 0 {
 		title := "🔥 DPS ranking"
@@ -215,6 +224,26 @@ func (m *Module) buildEmbed(info *ReportInfo, a *Analysis) *discordgo.MessageEmb
 	}
 
 	return embed
+}
+
+// downLines renders the Damage Down per-player tally, capped.
+func downLines(downs []DownEntry) string {
+	var b strings.Builder
+	shown := downs
+	if len(shown) > maxPlayerLines {
+		shown = shown[:maxPlayerLines]
+	}
+	for _, d := range shown {
+		job := ""
+		if d.Job != "" {
+			job = " *(" + d.Job + ")*"
+		}
+		fmt.Fprintf(&b, "**%d×** %s%s\n", d.Count, d.Player, job)
+	}
+	if len(downs) > maxPlayerLines {
+		fmt.Fprintf(&b, "…and %d more", len(downs)-maxPlayerLines)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // deathLines renders the per-death list for a single fight, capped.
